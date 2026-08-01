@@ -1,0 +1,10 @@
+hello world
+foo bar
+baz qux
+
+Pls Make Sure the Subagent are all good like ClaudeCode or Opencode actually.
+
+
+Now Pls Read the Full architecture of the Agent Properly So that it Perform Well actually LIke Coding Agent like Claude Code or Opencode
+
+I also want to Implement Long running task where a Agent actually one after another . It sees this are task to be Implemnted one after another

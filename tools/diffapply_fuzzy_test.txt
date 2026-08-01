@@ -1,0 +1,4 @@
+/* block
+   with indentation
+   third line
+ */
