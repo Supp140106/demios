@@ -5,6 +5,7 @@ import {
   ReasoningContent,
 } from "@/components/ui/reasoning"
 import { Tool } from "@/components/ui/tool"
+import { SubagentTranscript } from "@/components/subagent-transcript"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { DiffViewer } from "@/components/diff-viewer"
 import { Bot, User, Brain, FileDiff } from "lucide-react"
@@ -65,10 +66,17 @@ export function ChatMessage({ message }: ChatMessageProps) {
                     input: tc.args as Record<string, unknown>,
                     output: tc.output ? { result: tc.output } : undefined,
                     errorText: tc.error,
-                    toolCallId: tc.id,
-                  }}
-                  defaultOpen={false}
-                />
+                  toolCallId: tc.id,
+                }}
+                defaultOpen={
+                  tc.name === "StartServer" ||
+                  (tc.name === "TestWebsite" && !!tc.transcript)
+                }
+              >
+                {tc.name === "TestWebsite" && tc.transcript && (
+                  <SubagentTranscript transcript={tc.transcript} />
+                )}
+              </Tool>
                 {tc.diff && (
                   <div className="ml-6">
                     <div className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-muted-foreground">

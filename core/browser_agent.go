@@ -103,7 +103,7 @@ func (ba *BrowserAgent) StepStream(ctx context.Context, input string, events cha
 
 	log.Printf("[browser-agent] StepStream called: %d chars", len(input))
 	if ba.TargetURL != "" {
-		header := fmt.Sprintf("TARGET URL (you MUST browser_navigate to this exact URL first): %s\n\n", ba.TargetURL)
+		header := fmt.Sprintf("TARGET URL (this is the exact URL to test): %s\n\n", ba.TargetURL)
 		input = header + input
 	}
 	ba.history = append(ba.history, llm.UserMessage(input))
@@ -114,6 +114,27 @@ func (ba *BrowserAgent) StepStream(ctx context.Context, input string, events cha
 			"error": fmt.Sprintf("Failed to start browser: %v", err),
 		}})
 		return fmt.Sprintf("Failed to start browser: %v", err)
+	}
+
+	// Guarantee the browser is already on the target page BEFORE the model does
+	// anything — this no longer depends on the model remembering to call
+	// browser_navigate. Surfing always works.
+	if ba.TargetURL != "" {
+		if navErr := ba.browserSession.Navigate(ba.TargetURL); navErr != nil {
+			log.Printf("[browser-agent] auto-navigate to %s failed: %v", ba.TargetURL, navErr)
+			ba.emit(ctx, events, AgentEvent{Type: "browser-error", Data: map[string]string{
+				"error": fmt.Sprintf("Failed to load target URL: %v", navErr),
+			}})
+		} else {
+			log.Printf("[browser-agent] auto-navigated to %s", ba.TargetURL)
+		}
+	}
+
+	// Inject a ground-truth page snapshot (URL, title, real form-field selectors,
+	// visible text) so the model fills actual fields instead of guessing
+	// selectors like #username. Text entry/clicking always has real targets.
+	if snap := ba.snapshotPage(); snap != "" {
+		ba.history = append(ba.history, llm.UserMessage(snap))
 	}
 
 	ba.emit(ctx, events, AgentEvent{Type: "browser-open", Data: map[string]string{
@@ -404,6 +425,105 @@ func (ba *BrowserAgent) RequestPermission(ctx context.Context, events chan<- Age
 		return true, nil
 	}
 	return false, fmt.Errorf("permission check not implemented for browser agent")
+}
+
+// snapshotPage builds a ground-truth description of the currently loaded page
+// (URL, title, interactive form fields with real selectors, and visible text)
+// and injects it into the browser agent's context. Best-effort: any failure
+// returns "" and the agent proceeds normally.
+func (ba *BrowserAgent) snapshotPage() string {
+	sess := ba.browserSession
+	if sess == nil || !sess.IsOpen() || sess.Page() == nil {
+		return ""
+	}
+
+	var sb strings.Builder
+	sb.WriteString("PAGE SNAPSHOT (the browser is already on this page — verify it, do not re-navigate unless the task requires a different URL):\n")
+
+	url, _ := sess.CurrentURL()
+	sb.WriteString(fmt.Sprintf("URL: %s\n", url))
+	if title, err := sess.CurrentTitle(); err == nil && title != "" {
+		sb.WriteString(fmt.Sprintf("Title: %s\n", title))
+	}
+
+	if fields := ba.formFieldSnapshot(); len(fields) > 0 {
+		sb.WriteString("Interactive elements (use these real selectors for fill/click/type):\n")
+		for _, f := range fields {
+			sb.WriteString("  - " + f + "\n")
+		}
+	}
+
+	if text, err := sess.Page().TextContent("body"); err == nil {
+		text = strings.TrimSpace(text)
+		if text == "" {
+			text = "(empty page — it may still be loading; use browser_wait and browser_extract)"
+		}
+		if len(text) > 2000 {
+			text = text[:2000] + "..."
+		}
+		sb.WriteString("Visible text (truncated):\n" + text + "\n")
+	}
+
+	return sb.String()
+}
+
+// formFieldSnapshot lists input/textarea/select/button elements on the page
+// with their id, name, type, placeholder and visible label, so the model can
+// target real elements instead of guessing CSS selectors.
+func (ba *BrowserAgent) formFieldSnapshot() []string {
+	sess := ba.browserSession
+	if sess == nil || !sess.IsOpen() || sess.Page() == nil {
+		return nil
+	}
+
+	const js = `(els) => els.map((el) => ({
+		tag: el.tagName.toLowerCase(),
+		id: el.id || "",
+		name: el.name || "",
+		type: el.type || "",
+		placeholder: el.placeholder || "",
+		text: (el.innerText || "").trim().slice(0, 80)
+	})).slice(0, 40)`
+
+	res, err := sess.Page().Locator("input, textarea, select, button").EvaluateAll(js)
+	if err != nil || res == nil {
+		return nil
+	}
+	raw, err := json.Marshal(res)
+	if err != nil {
+		return nil
+	}
+	var items []map[string]string
+	if err := json.Unmarshal(raw, &items); err != nil {
+		return nil
+	}
+
+	out := make([]string, 0, len(items))
+	for _, it := range items {
+		var parts []string
+		if it["tag"] != "" {
+			parts = append(parts, "<"+it["tag"]+">")
+		}
+		if it["id"] != "" {
+			parts = append(parts, "id="+it["id"])
+		}
+		if it["name"] != "" {
+			parts = append(parts, "name="+it["name"])
+		}
+		if it["type"] != "" && it["type"] != "text" {
+			parts = append(parts, "type="+it["type"])
+		}
+		if it["placeholder"] != "" {
+			parts = append(parts, "placeholder=\""+it["placeholder"]+"\"")
+		}
+		if it["text"] != "" {
+			parts = append(parts, "label=\""+it["text"]+"\"")
+		}
+		if len(parts) > 0 {
+			out = append(out, strings.Join(parts, " "))
+		}
+	}
+	return out
 }
 
 func (ba *BrowserAgent) StopBrowser() {

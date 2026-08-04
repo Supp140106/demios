@@ -46,6 +46,10 @@ type ServerInstance struct {
 	// ("Port 5173 is in use, trying another one..."). Used to decide whether
 	// the LLM resolver should be consulted for the actual URL.
 	sawConflict bool
+
+	// onOutput, when set, is invoked with each line of server output as it
+	// arrives so the agent can stream it to the UI in real time.
+	onOutput func(s *ServerInstance, line string)
 }
 
 // Stdout returns captured stdout output.
@@ -78,21 +82,21 @@ var ansiRegex = regexp.MustCompile(`\x1b\[[0-9;]*[A-Za-z]`)
 
 func (s *ServerInstance) recordLine(buffer *bytes.Buffer, line string) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	buffer.WriteString(line + "\n")
 
 	port, fromURL, conflict := detectPortFromLine(stripANSI(line))
 	if conflict {
 		s.sawConflict = true
-		return
-	}
-	if port == 0 {
-		return
-	}
-	if fromURL || !s.portFromURL {
+	} else if port != 0 && (fromURL || !s.portFromURL) {
 		s.Port = port
 		s.URL = fmt.Sprintf("http://127.0.0.1:%d", port)
 		s.portFromURL = fromURL
+	}
+	cb := s.onOutput
+	s.mu.Unlock()
+
+	if cb != nil {
+		cb(s, line)
 	}
 }
 
@@ -485,6 +489,19 @@ func (sm *ServerManager) StartServer(ctx context.Context, workdir, command strin
 	sm.servers[id] = instance
 	sm.mu.Unlock()
 
+	// Stream the server's output to the UI in real time when the caller
+	// attached an event emitter to the context (the StartServer tool does).
+	if emitter := EventEmitterFrom(ctx); emitter != nil {
+		toolCallID := ToolCallIDFrom(ctx)
+		instance.onOutput = func(s *ServerInstance, line string) {
+			emitter("server-output", map[string]any{
+				"tool_call_id": toolCallID,
+				"server_id":    s.ID,
+				"line":         line,
+			})
+		}
+	}
+
 	go func() {
 		scanner := bufio.NewScanner(stdoutPipe)
 		scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
@@ -704,12 +721,15 @@ func (sm *ServerManager) urlReachable(rawURL string) bool {
 // ResolveBrowserTarget determines the URL a browser test should run against.
 // Priority:
 //  1. explicitURL — if provided and it is a reachable HTML page, it wins.
-//  2. the first running server managed by this ServerManager.
-//  3. an auto-started server for the given workspace.
+//  2. the first running server managed by this ServerManager (the one we
+//     actually started, so we never test an unrelated scanned port like the
+//     Demios frontend).
+//  3. an active dev server already running on the machine (e.g. manually started).
+//  4. an auto-started server for the given workspace.
 //
 // This is the single place the "which server do we test?" decision is made so
-// the main agent, the @browser route, and the CLI harness all behave
-// identically and always hand the port/URL to the browser agent.
+// the main agent and the CLI harness behave identically and always hand the
+// port/URL to the browser agent.
 func (sm *ServerManager) ResolveBrowserTarget(ctx context.Context, workspace, explicitURL string) (string, error) {
 	if explicitURL != "" {
 		if sm.urlReachable(explicitURL) {
@@ -718,6 +738,9 @@ func (sm *ServerManager) ResolveBrowserTarget(ctx context.Context, workspace, ex
 		log.Printf("[server] explicit URL %s not reachable, falling back to a managed server", explicitURL)
 	}
 
+	// Prefer a server we actually started and know the exact URL of. The
+	// port scan below can otherwise pick up the first reachable HTML page on
+	// a standard port (e.g. Demios's own frontend), which is wrong.
 	if running := sm.findRunningServer(); running != nil {
 		running.mu.RLock()
 		url := running.URL
@@ -725,6 +748,12 @@ func (sm *ServerManager) ResolveBrowserTarget(ctx context.Context, workspace, ex
 		if url != "" && sm.urlReachable(url) {
 			return url, nil
 		}
+	}
+
+	// Scan for any dev server already running on standard ports (e.g. started by the user)
+	if existing := sm.findExistingDevServer(); existing != "" {
+		log.Printf("[server] detected existing dev server running at %s", existing)
+		return existing, nil
 	}
 
 	if workspace == "" {

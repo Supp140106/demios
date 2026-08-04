@@ -17,57 +17,74 @@ import (
 )
 
 type ModelConfig struct {
-	ID          string
-	Label       string
-	BaseURL     string
-	APIKey      string // env var name
-	Model       string
-	BackendType string         // "openai" (default) or "genai"
-	ExtraBody   map[string]any // extra JSON body fields to include in API requests
+	ID              string            `json:"ID"`
+	Label           string            `json:"Label"`
+	BaseURL         string            `json:"BaseURL"`
+	APIKey          string            `json:"APIKey"`
+	Model           string            `json:"Model"`
+	BackendType     string            `json:"BackendType"`     // "openai" (default) or "genai"
+	AuthType        string            `json:"AuthType"`        // "env" (default), "bearer", "api-key", "none"
+	Headers         map[string]string `json:"Headers"`         // extra headers (e.g. Azure api-key, Anthropic x-api-key)
+	CompletionsURL  string            `json:"CompletionsURL"`  // full URL override for chat/completions endpoint
+	ExtraBody       map[string]any    `json:"ExtraBody"`       // extra JSON body fields to include in API requests
+	BuiltIn         bool              `json:"BuiltIn"`
+	EnvVarName      string            `json:"EnvVarName"`      // env var name for built-in providers
 }
 
 var AvailableModels = []ModelConfig{
 	{
-		ID:      "nvidia-inkling",
-		Label:   "Nvidia NIM (Inkling)",
-		BaseURL: "https://integrate.api.nvidia.com/v1",
-		APIKey:  "NVIDIA_API_KEY",
-		Model:   "thinkingmachines/inkling",
+		ID:          "nvidia-inkling",
+		Label:       "Nvidia NIM (Inkling)",
+		BaseURL:     "https://integrate.api.nvidia.com/v1",
+		APIKey:      "NVIDIA_API_KEY",
+		Model:       "thinkingmachines/inkling",
+		BuiltIn:     true,
+		EnvVarName:  "NVIDIA_API_KEY",
 	},
 	{
-		ID:      "openrouter-nemotron",
-		Label:   "OpenRouter (Nemotron)",
-		BaseURL: "https://openrouter.ai/api/v1",
-		APIKey:  "OPENROUTER_API_KEY",
-		Model:   "nvidia/nemotron-3-super-120b-a12b:free",
+		ID:          "openrouter-nemotron",
+		Label:       "OpenRouter (Nemotron)",
+		BaseURL:     "https://openrouter.ai/api/v1",
+		APIKey:      "OPENROUTER_API_KEY",
+		Model:       "nvidia/nemotron-3-super-120b-a12b:free",
+		BuiltIn:     true,
+		EnvVarName:  "OPENROUTER_API_KEY",
 	},
 	{
-		ID:      "mistral-large",
-		Label:   "Mistral Large",
-		BaseURL: "https://api.mistral.ai/v1",
-		APIKey:  "MISTRAL_API_KEY",
-		Model:   "mistral-large-latest",
+		ID:          "mistral-large",
+		Label:       "Mistral Large",
+		BaseURL:     "https://api.mistral.ai/v1",
+		APIKey:      "MISTRAL_API_KEY",
+		Model:       "mistral-large-latest",
+		BuiltIn:     true,
+		EnvVarName:  "MISTRAL_API_KEY",
 	},
 	{
-		ID:      "mistral-small",
-		Label:   "Mistral Small",
-		BaseURL: "https://api.mistral.ai/v1",
-		APIKey:  "MISTRAL_API_KEY",
-		Model:   "mistral-small-latest",
+		ID:          "mistral-small",
+		Label:       "Mistral Small",
+		BaseURL:     "https://api.mistral.ai/v1",
+		APIKey:      "MISTRAL_API_KEY",
+		Model:       "mistral-small-latest",
+		BuiltIn:     true,
+		EnvVarName:  "MISTRAL_API_KEY",
 	},
 	{
-		ID:      "groq-gpt-oss",
-		Label:   "Groq (GPT-OSS 120B)",
-		BaseURL: "https://api.groq.com/openai/v1",
-		APIKey:  "GROQ_API_KEY",
-		Model:   "openai/gpt-oss-120b",
+		ID:          "groq-gpt-oss",
+		Label:       "Groq (GPT-OSS 120B)",
+		BaseURL:     "https://api.groq.com/openai/v1",
+		APIKey:      "GROQ_API_KEY",
+		Model:       "openai/gpt-oss-120b",
+		BuiltIn:     true,
+		EnvVarName:  "GROQ_API_KEY",
 	},
 	{
-		ID:      "github-gpt-4o",
-		Label:   "GitHub Models (GPT-4o)",
-		BaseURL: "https://models.github.ai/inference",
-		APIKey:  "GITHUB_TOKEN",
-		Model:   "openai/gpt-4o",
+		ID:          "github-gpt-4o",
+		Label:       "GitHub Models (GPT-4o)",
+		BaseURL:     "https://models.github.ai/inference",
+		APIKey:      "GITHUB_TOKEN",
+		Model:       "openai/gpt-4o",
+		BuiltIn:     true,
+		EnvVarName:  "GITHUB_TOKEN",
 	},
 	{
 		ID:          "gemini-gemma",
@@ -75,34 +92,53 @@ var AvailableModels = []ModelConfig{
 		BackendType: "genai",
 		APIKey:      "GEMINI_API_KEY",
 		Model:       "gemma-4-31b-it",
+		BuiltIn:     true,
+		EnvVarName:  "GEMINI_API_KEY",
 	},
 	{
-		ID:      "local-mimo",
-		Label:   "north mini code",
-		BaseURL: "http://localhost:20128/v1",
-		APIKey:  "LOCAL_API_KEY",
-		Model:   "oc/north-mini-code-free",
+		ID:         "local-mimo",
+		Label:      "north mini code",
+		BaseURL:    "http://localhost:20128/v1",
+		APIKey:     "LOCAL_API_KEY",
+		Model:      "oc/north-mini-code-free",
+		BuiltIn:    true,
+		EnvVarName: "LOCAL_API_KEY",
 	},
 	{
-		ID:      "PoolSide",
-		Label:   "PoolSide",
-		BaseURL: "http://localhost:20128/v1",
-		APIKey:  "LOCAL_API_KEY",
-		Model:   "ps/poolside/laguna-s-2.1",
+		ID:         "PoolSide",
+		Label:      "PoolSide (Local)",
+		BaseURL:    "http://localhost:20128/v1",
+		APIKey:     "LOCAL_API_KEY",
+		Model:      "ps/poolside/laguna-s-2.1",
+		BuiltIn:    true,
+		EnvVarName: "LOCAL_API_KEY",
 	},
 	{
-		ID:      "Big Pickle",
-		Label:   "Big Pickle",
-		BaseURL: "http://localhost:20128/v1",
-		APIKey:  "LOCAL_API_KEY",
-		Model:   "oc/big-pickle",
+		ID:         "poolside-cloud",
+		Label:      "PoolSide Cloud",
+		BaseURL:    "https://inference.poolside.ai/v1",
+		APIKey:     "POOLSIDE_API_KEY",
+		Model:      "poolside/laguna-s-2.1",
+		BuiltIn:    true,
+		EnvVarName: "POOLSIDE_API_KEY",
 	},
 	{
-		ID:      "deepseek-v4-flash",
-		Label:   "DeepSeek V4 Flash (BazaarLink)",
-		BaseURL: "https://bazaarlink.ai/api/v1",
-		APIKey:  "BAZAARLINK_API_KEY",
-		Model:   "deepseek-v4-flash",
+		ID:         "Big Pickle",
+		Label:      "Big Pickle",
+		BaseURL:    "http://localhost:20128/v1",
+		APIKey:     "LOCAL_API_KEY",
+		Model:      "oc/big-pickle",
+		BuiltIn:    true,
+		EnvVarName: "LOCAL_API_KEY",
+	},
+	{
+		ID:         "deepseek-v4-flash",
+		Label:      "DeepSeek V4 Flash (BazaarLink)",
+		BaseURL:    "https://bazaarlink.ai/api/v1",
+		APIKey:     "BAZAARLINK_API_KEY",
+		Model:      "deepseek-v4-flash",
+		BuiltIn:    true,
+		EnvVarName: "BAZAARLINK_API_KEY",
 	},
 }
 
@@ -124,6 +160,13 @@ func NewClientWithModel(modelID string) *Client {
 	return newClientWithConfig(cfg)
 }
 
+func resolveAPIKey(cfg ModelConfig) string {
+	if cfg.BuiltIn || cfg.AuthType == "env" || cfg.AuthType == "" {
+		return os.Getenv(cfg.APIKey)
+	}
+	return cfg.APIKey
+}
+
 func newClientWithConfig(cfg ModelConfig) *Client {
 	if cfg.BackendType == "genai" {
 		return &Client{
@@ -132,11 +175,15 @@ func newClientWithConfig(cfg ModelConfig) *Client {
 		}
 	}
 
-	apiKey := os.Getenv(cfg.APIKey)
-	c := openai.NewClient(
+	apiKey := resolveAPIKey(cfg)
+	opts := []option.RequestOption{
 		option.WithBaseURL(cfg.BaseURL),
 		option.WithHeader("Authorization", "Bearer "+apiKey),
-	)
+	}
+	for k, v := range cfg.Headers {
+		opts = append(opts, option.WithHeader(k, v))
+	}
+	c := openai.NewClient(opts...)
 	return &Client{
 		sdk:    &c,
 		config: cfg,
@@ -144,12 +191,7 @@ func newClientWithConfig(cfg ModelConfig) *Client {
 }
 
 func findModelConfig(id string) ModelConfig {
-	for _, m := range AvailableModels {
-		if m.ID == id {
-			return m
-		}
-	}
-	return AvailableModels[0]
+	return FindModelConfig(id)
 }
 
 // SetModel switches the client to the specified model ID.
@@ -167,11 +209,15 @@ func (c *Client) SetModel(modelID string) error {
 		return nil
 	}
 
-	apiKey := os.Getenv(cfg.APIKey)
-	sdk := openai.NewClient(
+	apiKey := resolveAPIKey(cfg)
+	opts := []option.RequestOption{
 		option.WithBaseURL(cfg.BaseURL),
 		option.WithHeader("Authorization", "Bearer "+apiKey),
-	)
+	}
+	for k, v := range cfg.Headers {
+		opts = append(opts, option.WithHeader(k, v))
+	}
+	sdk := openai.NewClient(opts...)
 	c.sdk = &sdk
 	c.genai = nil
 	c.config = cfg
@@ -185,7 +231,7 @@ func (c *Client) GetCurrentModel() ModelConfig {
 
 // GetModels returns all available model configs.
 func (c *Client) GetModels() []ModelConfig {
-	return AvailableModels
+	return GetAllModels()
 }
 
 // Chat sends a non-streaming request with tools.
@@ -228,13 +274,20 @@ func (c *Client) ChatStream(ctx context.Context, systemPrompt string, history []
 		return nil, fmt.Errorf("build request body: %w", err)
 	}
 
-	apiKey := os.Getenv(c.config.APIKey)
-	req, err := http.NewRequestWithContext(ctx, "POST", c.config.BaseURL+"/chat/completions", bytes.NewReader(body))
+	apiKey := resolveAPIKey(c.config)
+	completionsURL := c.config.CompletionsURL
+	if completionsURL == "" {
+		completionsURL = c.config.BaseURL + "/chat/completions"
+	}
+	req, err := http.NewRequestWithContext(ctx, "POST", completionsURL, bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+apiKey)
+	for k, v := range c.config.Headers {
+		req.Header.Set(k, v)
+	}
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {

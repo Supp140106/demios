@@ -821,3 +821,74 @@ while ($listener.IsListening) {
 	}
 	t.Logf("TestWebsite fell back to running server: %s", gotURL)
 }
+
+// TestResolveBrowserTargetPrefersManagedOverScan verifies that a server we
+// actually started (managed) wins over the generic port scan — otherwise the
+// browser could end up testing an unrelated app (e.g. Demios on 5173) that
+// happens to answer on a lower standard port.
+func TestResolveBrowserTargetPrefersManagedOverScan(t *testing.T) {
+	sm := NewServerManager()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	var decoyPort, managedPort int
+	for port := 8080; port <= 8090; port++ {
+		if isPortInUse(port) {
+			continue
+		}
+		if decoyPort == 0 {
+			decoyPort = port
+		} else {
+			managedPort = port
+			break
+		}
+	}
+	if decoyPort == 0 || managedPort == 0 {
+		t.Fatal("no free ports in 8080-8090 scan range")
+	}
+
+	// Decoy HTML server on the LOWER port — the old order (scan-first) would
+	// have picked this one.
+	startTestHTTPServer(t, decoyPort, "text/html", "<!doctype html><h1>decoy</h1>")
+
+	// Managed server on the HIGHER port.
+	dir := t.TempDir()
+	var cmd string
+	if runtime.GOOS == "windows" {
+		httpScript := fmt.Sprintf(`
+$listener = New-Object System.Net.HttpListener
+$listener.Prefixes.Add("http://localhost:%d/")
+$listener.Start()
+Write-Host "Local: http://localhost:%d/"
+while ($listener.IsListening) {
+    $ctx = $listener.GetContext()
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes("<!doctype html><h1>managed</h1>")
+    $ctx.Response.ContentType = "text/html"
+    $ctx.Response.ContentLength64 = $bytes.Length
+    $ctx.Response.OutputStream.Write($bytes, 0, $bytes.Length)
+    $ctx.Response.Close()
+}
+`, managedPort, managedPort)
+		scriptPath := writeTestScript(t, dir, httpScript)
+		cmd = fmt.Sprintf("powershell -NoProfile -NonInteractive -File %s", scriptPath)
+	} else {
+		httpScript := fmt.Sprintf("#!/bin/sh\necho 'Local: http://localhost:%d/'\nexec python3 -m http.server %d --bind 127.0.0.1\n", managedPort, managedPort)
+		scriptPath := writeTestScript(t, dir, httpScript)
+		cmd = fmt.Sprintf("sh %s", scriptPath)
+	}
+
+	inst, err := sm.StartServer(ctx, dir, cmd, 0)
+	if err != nil {
+		t.Fatalf("StartServer failed: %v", err)
+	}
+	defer sm.StopServer(inst.ID)
+
+	got, err := sm.ResolveBrowserTarget(ctx, dir, "")
+	if err != nil {
+		t.Fatalf("ResolveBrowserTarget: %v", err)
+	}
+	want := inst.URL
+	if got != want {
+		t.Errorf("ResolveBrowserTarget = %q, want managed server %q (must NOT pick decoy on port %d)", got, want, decoyPort)
+	}
+}

@@ -130,6 +130,8 @@
     }
   html {
     @apply font-sans;
+    background-color: var(--background);
+    min-height: 100%;
     }
 }
 

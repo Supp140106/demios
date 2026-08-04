@@ -5,7 +5,10 @@ import (
 	"database/sql"
 	"encoding/json"
 	"log"
+	"net"
 	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 
 	"demios/core"
@@ -19,17 +22,39 @@ type chatRequest struct {
 	SessionID string `json:"session_id"`
 }
 
+func excludeFrontendPort(agent *core.Agent, r *http.Request) {
+	for _, header := range []string{"Origin", "Referer"} {
+		val := r.Header.Get(header)
+		if val == "" {
+			continue
+		}
+		u, err := url.Parse(val)
+		if err != nil && !strings.Contains(val, "://") {
+			u, err = url.Parse("http://" + val)
+		}
+		if err == nil && u != nil {
+			if _, portStr, err := net.SplitHostPort(u.Host); err == nil {
+				if p, err := strconv.Atoi(portStr); err == nil && p > 0 {
+					agent.ServerManager().ExcludePort(p)
+					log.Printf("[server] dynamically excluded frontend port %d from dev-server detection", p)
+				}
+			} else if portStr := u.Port(); portStr != "" {
+				if p, err := strconv.Atoi(portStr); err == nil && p > 0 {
+					agent.ServerManager().ExcludePort(p)
+					log.Printf("[server] dynamically excluded frontend port %d from dev-server detection", p)
+				}
+			}
+		}
+	}
+}
+
 func HandleChatStream(agent *core.Agent, database *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		excludeFrontendPort(agent, r)
+
 		var req chatRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			sse.WriteError(w, err)
-			return
-		}
-
-		if strings.HasPrefix(strings.TrimSpace(req.Message), "@browser") {
-			browserPrompt := strings.TrimSpace(strings.TrimPrefix(req.Message, "@browser"))
-			HandleBrowserStart(agent, agent.ServerManager(), w, r, browserPrompt)
 			return
 		}
 

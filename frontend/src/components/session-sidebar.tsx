@@ -21,7 +21,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
-import { Plus, Trash2, MessageSquare, FolderOpen } from "lucide-react"
+import { Plus, Trash2, MessageSquare, FolderOpen, Settings } from "lucide-react"
 import { useState } from "react"
 import type { SessionInfo } from "@/hooks/use-sessions"
 import { cn } from "@/lib/utils"
@@ -33,6 +33,7 @@ type SessionSidebarProps = {
   onCreateSession: () => void
   onDeleteSession: (id: string) => void
   onOpenWorkspace: () => void
+  onOpenProviders: () => void
   workspace: string | null
 }
 
@@ -50,6 +51,7 @@ export function SessionSidebar({
   onCreateSession,
   onDeleteSession,
   onOpenWorkspace,
+  onOpenProviders,
   workspace,
 }: SessionSidebarProps) {
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null)
@@ -102,17 +104,15 @@ export function SessionSidebar({
                       >
                         {truncateTitle(session.title)}
                       </span>
-                      <Button
-                        variant="ghost"
-                        size="icon-xs"
-                        className="-mr-1 shrink-0 opacity-0 group-hover/item:opacity-100 group-data-[collapsible=icon]:hidden"
+                      <div
+                        className="inline-flex shrink-0 items-center justify-center rounded-lg border border-transparent bg-clip-padding text-sm font-medium whitespace-nowrap transition-all outline-none select-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 active:not-aria-[haspopup]:translate-y-px disabled:pointer-events-none disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 size-6 rounded-[min(var(--radius-md),10px)] in-data-[slot=button-group]:rounded-lg [&_svg:not([class*='size-'])]:size-3 opacity-0 group-hover/item:opacity-100 group-data-[collapsible=icon]:hidden cursor-pointer"
                         onClick={(e) => {
                           e.stopPropagation()
                           setDeleteTarget(session.id)
                         }}
                       >
                         <Trash2 className="h-3 w-3 text-destructive" />
-                      </Button>
+                      </div>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
                 ))}
@@ -121,7 +121,16 @@ export function SessionSidebar({
           </SidebarGroup>
         </SidebarContent>
 
-        <SidebarFooter className="border-t p-3">
+        <SidebarFooter className="border-t p-3 space-y-1">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="w-full justify-start gap-2 text-xs text-muted-foreground group-data-[collapsible=icon]:hidden"
+            onClick={onOpenProviders}
+          >
+            <Settings className="h-3.5 w-3.5 shrink-0" />
+            LLM Providers
+          </Button>
           <Button
             variant="ghost"
             size="sm"

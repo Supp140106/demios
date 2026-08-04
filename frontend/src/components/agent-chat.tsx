@@ -12,7 +12,7 @@ import { WorkspaceDialog } from "@/components/workspace-dialog"
 import { CanvasPanel } from "@/components/canvas-panel"
 import { PermissionDialog } from "@/components/permission-dialog"
 import { HumanInputDialog } from "@/components/human-input-dialog"
-import { BrowserPanel } from "@/components/browser-panel"
+import { ProviderSettings } from "@/components/providers-settings"
 import {
   SidebarProvider,
   SidebarInset,
@@ -47,11 +47,12 @@ const {
     sendMessage,
     clearMessages,
     setMessages,
+    stopGeneration,
     respondPermission,
     respondHumanInput,
   } = useChatState()
   const { workspace, setWorkspace } = useWorkspace()
-  const { models, currentModel, selectModel } = useModel()
+  const { models, currentModel, selectModel, refreshModels } = useModel()
   const {
     sessions,
     currentSessionId,
@@ -64,6 +65,7 @@ const {
     refreshSessionMessages,
   } = useSessions(workspace)
   const [showWorkspace, setShowWorkspace] = useState(false)
+  const [showProviders, setShowProviders] = useState(false)
   const [canvasOpen, setCanvasOpen] = useState(false)
   const [chatRatio, setChatRatio] = useState(0.35)
   const [isDragging, setIsDragging] = useState(false)
@@ -154,6 +156,7 @@ const {
         onCreateSession={handleNewChat}
         onDeleteSession={handleDeleteSession}
         onOpenWorkspace={() => setShowWorkspace(true)}
+        onOpenProviders={() => setShowProviders(true)}
         workspace={workspace}
       />
 
@@ -187,7 +190,13 @@ const {
             <WorkspaceDialog onSelect={handleWorkspaceSelect} />
           )}
 
-          <BrowserPanel />
+          <ProviderSettings
+            open={showProviders}
+            onClose={() => {
+              setShowProviders(false)
+              refreshModels()
+            }}
+          />
 
           <header className="flex shrink-0 items-center justify-between border-b px-4 py-2">
             <div className="flex items-center gap-2">
@@ -249,6 +258,10 @@ const {
             onSelectModel={selectModel}
             onSubmit={handleSend}
             browserActive={browserState.active}
+            isLoading={isLoading}
+            onStop={stopGeneration}
+            workspaceMissing={!workspace}
+            onOpenProviders={() => setShowProviders(true)}
           />
         </SidebarInset>
 

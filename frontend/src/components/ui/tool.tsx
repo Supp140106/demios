@@ -31,9 +31,15 @@ export type ToolProps = {
   toolPart: ToolPart
   defaultOpen?: boolean
   className?: string
+  children?: React.ReactNode
 }
 
-const Tool = ({ toolPart, defaultOpen = false, className }: ToolProps) => {
+const Tool = ({
+  toolPart,
+  defaultOpen = false,
+  className,
+  children,
+}: ToolProps) => {
   const [isOpen, setIsOpen] = useState(defaultOpen)
 
   const { state, input, output, toolCallId } = toolPart
@@ -229,6 +235,8 @@ const Tool = ({ toolPart, defaultOpen = false, className }: ToolProps) => {
                 Processing tool call...
               </div>
             )}
+
+            {children}
 
             {toolCallId && (
               <div className="border-t border-blue-200 pt-2 text-xs text-muted-foreground">

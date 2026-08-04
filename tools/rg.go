@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 )
 
 func findRg() (string, error) {
@@ -16,16 +17,24 @@ func findRg() (string, error) {
 	}
 	exe, err := os.Executable()
 	if err == nil {
-		p := filepath.Join(filepath.Dir(exe), "embed", "rg.exe")
+		embedName := "rg.exe"
+		if runtime.GOOS != "windows" {
+			embedName = "rg"
+		}
+		p := filepath.Join(filepath.Dir(exe), "embed", embedName)
 		if _, err := os.Stat(p); err == nil {
 			return p, nil
 		}
 	}
-	for _, c := range []string{"embed/rg.exe", "../embed/rg.exe"} {
+	embedName := "rg.exe"
+	if runtime.GOOS != "windows" {
+		embedName = "rg"
+	}
+	for _, c := range []string{filepath.Join("embed", embedName), filepath.Join("..", "embed", embedName)} {
 		if _, err := os.Stat(c); err == nil {
 			abs, _ := filepath.Abs(c)
 			return abs, nil
 		}
 	}
-	return "", fmt.Errorf("ripgrep (rg.exe) not found on PATH or in embed/ directory")
+	return "", fmt.Errorf("ripgrep (rg) not found on PATH or in embed/ directory")
 }

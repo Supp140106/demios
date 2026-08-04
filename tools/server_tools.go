@@ -44,8 +44,19 @@ func MakeStartServerTool(sm *ServerManager) Tool {
 				return ExecuteResult{}, err
 			}
 
+			captured := strings.TrimSpace(instance.Stdout())
+			if stderr := strings.TrimSpace(instance.Stderr()); stderr != "" {
+				if captured != "" {
+					captured += "\n"
+				}
+				captured += stderr
+			}
+
 			output := fmt.Sprintf("Server started successfully.\nID: %s\nURL: %s\nPort: %d\nPID: %d\nProject: %s\nStatus: %s\nCommand: %s\nUptime: just started",
 				instance.ID, instance.URL, instance.Port, instance.PID, instance.ProjectDir, instance.Status, instance.Command)
+			if captured != "" {
+				output += "\n\nConsole output:\n" + captured
+			}
 
 			return ExecuteResult{
 				Title:  fmt.Sprintf("Server started at %s", instance.URL),
@@ -154,6 +165,12 @@ func MakeGetServerStatusTool(sm *ServerManager) Tool {
 
 			servers := sm.ListServers()
 			if len(servers) == 0 {
+				if existing := sm.findExistingDevServer(); existing != "" {
+					return ExecuteResult{
+						Title:  "No managed servers running (existing server detected)",
+						Output: fmt.Sprintf("No dev servers are currently managed by this agent.\nHowever, an existing dev server was detected running at: %s", existing),
+					}, nil
+				}
 				return ExecuteResult{
 					Title:  "No servers running",
 					Output: "No dev servers are currently running.",
@@ -234,6 +251,12 @@ func MakeListServersTool(sm *ServerManager) Tool {
 		Execute: func(ctx context.Context, rawArgs json.RawMessage) (ExecuteResult, error) {
 			servers := sm.ListServers()
 			if len(servers) == 0 {
+				if existing := sm.findExistingDevServer(); existing != "" {
+					return ExecuteResult{
+						Title:  "No managed servers running (existing server detected)",
+						Output: fmt.Sprintf("No dev servers are currently managed by this agent.\nHowever, an existing dev server was detected running at: %s", existing),
+					}, nil
+				}
 				return ExecuteResult{
 					Title:  "No servers running",
 					Output: "No dev servers are currently running.",

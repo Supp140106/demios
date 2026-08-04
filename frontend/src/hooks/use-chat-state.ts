@@ -10,6 +10,32 @@ export type ToolCallState = {
   error?: string
   diff?: string
   diffs?: { path: string; patch: string }[]
+  transcript?: SubagentTranscript
+}
+
+export type SubagentTranscript = {
+  active: boolean
+  url: string
+  title: string
+  thinking: string
+  content: string
+  toolCalls: ToolCallState[]
+  screenshot: string | null
+  done: boolean
+  error?: string
+}
+
+type SubagentInnerData = {
+  token?: string
+  status?: string
+  url?: string
+  title?: string
+  screenshot?: string
+  id?: string
+  name?: string
+  args?: Record<string, unknown>
+  output?: string
+  error?: string
 }
 
 export type Message = {
@@ -76,6 +102,19 @@ let cachedPort: string | null = null
 async function getPort(): Promise<string> {
   if (!cachedPort) cachedPort = await GetServerPort()
   return cachedPort
+}
+
+function emptyTranscript(): SubagentTranscript {
+  return {
+    active: true,
+    url: "",
+    title: "",
+    thinking: "",
+    content: "",
+    toolCalls: [],
+    screenshot: null,
+    done: false,
+  }
 }
 
 let messageCounter = 0
@@ -240,6 +279,24 @@ export function useChatState() {
             next[idx] = msg
             return next
           })
+        }
+
+        function updateAssistTranscript(
+          toolId: string,
+          fn: (tr: SubagentTranscript) => SubagentTranscript
+        ) {
+          if (!assistantMsg) return
+          updateAssist((m) => ({
+            ...m,
+            toolCalls: m.toolCalls.map((t) =>
+              t.id === toolId
+                ? {
+                    ...t,
+                    transcript: fn(t.transcript || emptyTranscript()),
+                  }
+                : t
+            ),
+          }))
         }
 
         while (true) {
@@ -414,6 +471,99 @@ export function useChatState() {
                    updateTopologyEdge("e-browser-server", { active: false })
                    break
                  }
+                 case "subagent-event": {
+                   const toolId = parsed.tool_id as string
+                   const innerType = parsed.inner_type as string
+                   const inner = (parsed.data || {}) as SubagentInnerData
+
+                   if (
+                     innerType === "browser-open" ||
+                     innerType === "browser-opened" ||
+                     innerType === "iteration"
+                   ) {
+                     setBrowserState((prev) => ({ ...prev, active: true }))
+                   }
+                   if (
+                     innerType === "browser-done" ||
+                     innerType === "browser-stop" ||
+                     innerType === "browser-stopped" ||
+                     innerType === "browser-error"
+                   ) {
+                     setBrowserState((prev) => ({ ...prev, active: false }))
+                   }
+
+                   updateAssistTranscript(toolId, (tr) => {
+                     switch (innerType) {
+                       case "think":
+                         return {
+                           ...tr,
+                           thinking: tr.thinking + (inner.token || ""),
+                         }
+                       case "token":
+                         return {
+                           ...tr,
+                           content: tr.content + (inner.token || ""),
+                         }
+                       case "browser-action":
+                         return {
+                           ...tr,
+                           content: tr.content + (inner.status || ""),
+                         }
+                       case "page-navigated":
+                         return {
+                           ...tr,
+                           url: inner.url || tr.url,
+                           title: inner.title || tr.title,
+                         }
+                       case "browser-screenshot":
+                         return {
+                           ...tr,
+                           screenshot: inner.screenshot || tr.screenshot,
+                         }
+                        case "tool-call": {
+                          const tc: ToolCallState = {
+                            id: inner.id || "",
+                            name: inner.name || "",
+                            args: inner.args || {},
+                            status: "running",
+                          }
+                          return { ...tr, toolCalls: [...tr.toolCalls, tc] }
+                        }
+                        case "tool-result":
+                          return {
+                            ...tr,
+                            toolCalls: tr.toolCalls.map((t) =>
+                              t.id === inner.id
+                                ? {
+                                    id: inner.id || "",
+                                    name: inner.name || "",
+                                    args: inner.args || t.args,
+                                    status: inner.error
+                                      ? "error"
+                                      : "completed",
+                                    output: inner.output,
+                                    error: inner.error,
+                                  }
+                                : t
+                            ),
+                          }
+                       case "browser-error":
+                       case "error":
+                         return {
+                           ...tr,
+                           error:
+                             inner.error || "Browser agent encountered an error",
+                           done: true,
+                           active: false,
+                         }
+                       case "browser-done":
+                         return { ...tr, done: true, active: false }
+                       default:
+                         return tr
+                     }
+                   })
+                   break
+                 }
                  case "browser-open":
                  case "browser-opened": {
                    setBrowserState((prev) => ({
@@ -461,14 +611,7 @@ export function useChatState() {
                    })
                    break
                  }
-                 case "browser-control": {
-                   setBrowserState((prev) => ({
-                     ...prev,
-                     mode: parsed.mode || prev.mode,
-                   }))
-                   break
-                 }
-                 case "browser-stop":
+                  case "browser-stop":
                  case "browser-stopped": {
                    ensureAssistant()
                    updateAssist((m) => ({
@@ -560,45 +703,6 @@ export function useChatState() {
     [setTopologyActive, updateTopologyEdge, updateTopologyNode]
   )
 
-    const stopBrowser = useCallback(async () => {
-      try {
-        const port = await getPort()
-        await fetch(`http://${port}/api/browser/stop`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({}),
-        })
-      } catch {
-        // ignore
-      }
-    }, [])
-
-    const takeBrowserControl = useCallback(async () => {
-      try {
-        const port = await getPort()
-        await fetch(`http://${port}/api/browser/take-control`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({}),
-        })
-      } catch {
-        // ignore
-      }
-    }, [])
-
-    const giveBrowserControl = useCallback(async () => {
-      try {
-        const port = await getPort()
-        await fetch(`http://${port}/api/browser/give-control`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({}),
-        })
-      } catch {
-        // ignore
-      }
-    }, [])
-
     const stopGeneration = useCallback(() => {
       abortRef.current?.abort()
       abortRef.current = null
@@ -623,9 +727,6 @@ export function useChatState() {
         setMessages,
         respondPermission,
         respondHumanInput,
-        stopBrowser,
-        takeBrowserControl,
-        giveBrowserControl,
         updateTopologyNode,
         updateTopologyEdge,
         setTopologyActive,

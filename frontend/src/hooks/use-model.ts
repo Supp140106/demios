@@ -11,22 +11,23 @@ export function useModel() {
   const [currentModel, setCurrentModel] = useState<string>("")
   const [loaded, setLoaded] = useState(false)
 
-  useEffect(() => {
-    async function init() {
-      try {
-        const [modelList, currentId] = await Promise.all([
-          GetModels(),
-          GetCurrentModel(),
-        ])
-        setModels(modelList)
-        setCurrentModel(currentId)
-        setLoaded(true)
-      } catch {
-        setLoaded(true)
-      }
+  const loadModels = useCallback(async () => {
+    try {
+      const [modelList, currentId] = await Promise.all([
+        GetModels(),
+        GetCurrentModel(),
+      ])
+      setModels(modelList)
+      setCurrentModel(currentId)
+      setLoaded(true)
+    } catch {
+      setLoaded(true)
     }
-    init()
   }, [])
+
+  useEffect(() => {
+    loadModels()
+  }, [loadModels])
 
   const selectModel = useCallback(async (id: string) => {
     try {
@@ -38,5 +39,9 @@ export function useModel() {
     }
   }, [])
 
-  return { models, currentModel, selectModel, loaded }
+  const refreshModels = useCallback(async () => {
+    await loadModels()
+  }, [loadModels])
+
+  return { models, currentModel, selectModel, loaded, refreshModels }
 }

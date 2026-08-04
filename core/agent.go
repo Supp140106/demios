@@ -83,7 +83,7 @@ You have access to the following tools to help users with software engineering t
 - Edit: Edit a file using a unified diff patch.
 - Grep: Search file contents with regex (ripgrep-powered).
 - Glob: Find files matching a glob pattern (ripgrep-powered).
-- Bash: Execute a shell command (PowerShell on Windows).
+- Bash: Execute a shell command (bash on Linux/macOS, PowerShell on Windows).
 - Undo: Undo the most recent file edit.
 - ReadRelated: Read multiple files at once into context.
 - ProjectStructure: Get the project's file structure.
@@ -99,17 +99,26 @@ You have access to the following tools to help users with software engineering t
 IMPORTANT: Use the right tool for the job:
 - Use Glob for listing/finding files.
 - Use Grep for searching file contents.
-- Use Bash only for running tests, builds, git operations, installing packages, and executing scripts.
+- Use Bash only for running tests, builds, git operations, installing packages, and executing scripts. Bash NEVER runs dev servers.
 - Use Read to inspect files before editing them.
 - Use ReadRelated to load multiple related files at once.
 - Use ProjectStructure to understand the codebase layout.
 - Use Task to delegate complex multi-step work to a sub-agent.
-- When the user asks you to verify/test a website or check its appearance, start a dev server (StartServer) if needed and then call TestWebsite with a detailed 'prompt' for the Browser Agent (what to click, what to fill, what to verify, what colors/theme to check). Do NOT skip steps — give the Browser Agent complete, explicit instructions so it can run the whole flow itself.
+- When the user asks you to verify/test a website or check its appearance, ALWAYS: (1) StartServer to launch the dev server, then (2) TestWebsite with a detailed 'prompt' for the Browser Agent (what to click, what to fill, what to verify, what colors/theme to check). Do NOT skip steps — give the Browser Agent complete, explicit instructions so it can run the whole flow itself.
 
-Bash runs in PowerShell on Windows. Use PowerShell syntax:
-- Use ; to chain commands, NOT &&
-- Use Test-Path instead of test -f
-- Use Get-Date instead of date
+STARTING & TESTING WEB APPS (follow these rules strictly):
+- ALWAYS start a dev server with StartServer and test with TestWebsite. NEVER run 'npm run dev', 'pnpm dev', 'next dev', 'vite', 'ng serve', 'react-scripts start', 'python -m http.server', or any long-running server command through Bash — Bash BLOCKS them and cannot report a reliable port. If you try, Bash will refuse and tell you to use StartServer.
+- StartServer runs the server in the background, streams its real-time output, waits until it is ready, and returns the AUTHORITATIVE URL. TRUST that returned URL — it is the exact port the server actually bound to. Never invent, guess, or reuse a different port, even if another tool's output mentioned one.
+- If server output contains "Port X is in use, trying another one..." the real URL is the one printed in the final 'Local:' / '➜ Local:' line — never the port that was already in use.
+- For non-JavaScript projects (Go, Rust, Python, etc.) there is no package.json, so pass the exact start command to StartServer, e.g. StartServer(command="go run .", workdir=<project dir>). StartServer detects the port from the output.
+- For a Vite/Next.js app with a package.json, StartServer(command="npm run dev", workdir=<project dir>) works, or omit the command and StartServer auto-detects it from package.json.
+- After StartServer returns, immediately call TestWebsite(url=<the EXACT URL StartServer returned>, prompt=<detailed steps: what to navigate, wait for, click, fill, verify, screenshot>). Pass the returned URL; do not let TestWebsite re-guess a URL.
+- The Browser Agent opens a real Chromium window, navigates to the URL you gave it, fills real form fields, clicks, screenshots, and returns a report. Trust its report but confirm it actually reached your URL.
+- If the URL StartServer returned points to an app you did NOT start (e.g. the Demios app itself), STOP and report the discrepancy. Never test the wrong app.
+
+Bash runs bash on Linux/macOS and PowerShell on Windows. Use the appropriate syntax for the platform:
+- On Linux/macOS (bash): use && to chain commands, use test -f or [ -f ] for file tests, use date for dates
+- On Windows (PowerShell): use ; to chain commands, use Test-Path for file tests, use Get-Date for dates
 
 RULES:
 - Always read files before editing them.
@@ -294,11 +303,19 @@ func (a *Agent) runBrowserTest(ctx context.Context, url string, prompt string) (
 	ba.Workspace = a.Workspace
 	ba.TargetURL = url
 
+	toolID := tools.ToolCallIDFrom(ctx)
+
 	browserEvents := make(chan AgentEvent)
 	if a.currentEvents != nil {
 		go func() {
 			for evt := range browserEvents {
-				if !a.emit(ctx, a.currentEvents, evt) {
+				payload := map[string]interface{}{
+					"agent":      "browser-agent",
+					"tool_id":    toolID,
+					"inner_type": evt.Type,
+					"data":       evt.Data,
+				}
+				if !a.emit(ctx, a.currentEvents, AgentEvent{Type: "subagent-event", Data: payload}) {
 					return
 				}
 			}
@@ -321,9 +338,9 @@ func (a *Agent) runBrowserTest(ctx context.Context, url string, prompt string) (
 			return "Browser test completed, but the browser agent returned no report. The page may have failed to load or the browser encountered an error.", nil
 		}
 		return report, nil
-	case <-time.After(120 * time.Second):
+	case <-time.After(300 * time.Second):
 		ba.StopBrowser()
-		return "Browser test timed out after 120s.", nil
+		return "Browser test timed out after 300s.", nil
 	}
 }
 
@@ -799,7 +816,17 @@ func (a *Agent) execToolCalls(ctx context.Context, toolCalls []openai.ChatComple
 				}
 			}
 
-			execResult, err := tool.Execute(ctx, rawArgs)
+			// Per-tool context: carry the tool-call ID so streamed events can be
+			// correlated in the UI, and an event emitter so long-running tools
+			// (StartServer) can stream output in real time while still executing.
+			toolCtx := tools.WithToolCallID(ctx, tc.ID)
+			if events != nil {
+				toolCtx = tools.WithEventEmitter(toolCtx, func(evtType string, data map[string]any) {
+					a.emit(ctx, events, AgentEvent{Type: evtType, Data: data})
+				})
+			}
+
+			execResult, err := tool.Execute(toolCtx, rawArgs)
 			if err != nil {
 				results[i] = toolExecResult{index: i, name: tc.Function.Name, id: tc.ID, args: parsedArgs, err: err}
 				return

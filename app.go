@@ -43,6 +43,8 @@ func (a *App) startup(ctx context.Context) {
 		log.Printf("DB initialized at %s", dbPath)
 	}
 
+	llm.SetProvidersDir(userDataDir())
+
 	srv, port, err := server.StartServer(a.agent, a.db, "127.0.0.1:0")
 	if err != nil {
 		log.Fatal(err)
@@ -173,6 +175,26 @@ func (a *App) StopBrowserAgent() {
 
 func (a *App) GetBrowserAgent() *core.BrowserAgent {
 	return a.browserAgent
+}
+
+func (a *App) GetProviderPresets() []llm.ProviderPreset {
+	return llm.ProviderPresets
+}
+
+func (a *App) GetProviders() []llm.ProviderConfig {
+	return llm.GetUserProviders()
+}
+
+func (a *App) AddProvider(cfg llm.ProviderConfig) error {
+	return llm.AddUserProvider(cfg)
+}
+
+func (a *App) UpdateProvider(cfg llm.ProviderConfig) error {
+	return llm.UpdateUserProvider(cfg)
+}
+
+func (a *App) RemoveProvider(id string) error {
+	return llm.RemoveUserProvider(id)
 }
 
 func (a *App) shutdown(ctx context.Context) {
