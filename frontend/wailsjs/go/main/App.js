@@ -6,8 +6,16 @@ export function AddProvider(arg1) {
   return window['go']['main']['App']['AddProvider'](arg1);
 }
 
+export function CloseTerminal(arg1) {
+  return window['go']['main']['App']['CloseTerminal'](arg1);
+}
+
 export function CreateSession(arg1) {
   return window['go']['main']['App']['CreateSession'](arg1);
+}
+
+export function CreateTerminal(arg1, arg2) {
+  return window['go']['main']['App']['CreateTerminal'](arg1, arg2);
 }
 
 export function DeleteSession(arg1) {
@@ -50,8 +58,28 @@ export function GetWorkspace() {
   return window['go']['main']['App']['GetWorkspace']();
 }
 
+export function ListTerminals() {
+  return window['go']['main']['App']['ListTerminals']();
+}
+
+export function ListWorkspaceFiles(arg1) {
+  return window['go']['main']['App']['ListWorkspaceFiles'](arg1);
+}
+
 export function PickDirectory() {
   return window['go']['main']['App']['PickDirectory']();
+}
+
+export function ReadTerminal(arg1) {
+  return window['go']['main']['App']['ReadTerminal'](arg1);
+}
+
+export function ReadWorkspaceFile(arg1) {
+  return window['go']['main']['App']['ReadWorkspaceFile'](arg1);
+}
+
+export function ReadWorkspaceFolder(arg1, arg2) {
+  return window['go']['main']['App']['ReadWorkspaceFolder'](arg1, arg2);
 }
 
 export function RemoveProvider(arg1) {
@@ -60,6 +88,10 @@ export function RemoveProvider(arg1) {
 
 export function RenameSession(arg1, arg2) {
   return window['go']['main']['App']['RenameSession'](arg1, arg2);
+}
+
+export function ResizeTerminal(arg1, arg2, arg3) {
+  return window['go']['main']['App']['ResizeTerminal'](arg1, arg2, arg3);
 }
 
 export function SetBrowserAgent(arg1) {
@@ -80,4 +112,8 @@ export function StopBrowserAgent() {
 
 export function UpdateProvider(arg1) {
   return window['go']['main']['App']['UpdateProvider'](arg1);
+}
+
+export function WriteTerminal(arg1, arg2) {
+  return window['go']['main']['App']['WriteTerminal'](arg1, arg2);
 }

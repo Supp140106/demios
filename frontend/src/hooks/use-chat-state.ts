@@ -230,8 +230,18 @@ export function useChatState() {
    }, [])
 
    const sendMessage = useCallback(
-    async (content: string, sessionId?: string) => {
-      const userMessage = createMessage("user", content)
+    async (content: string, sessionId?: string, fileContents?: Record<string, string>) => {
+      let enrichedContent = content
+      if (fileContents && Object.keys(fileContents).length > 0) {
+        const fileBlocks = Object.entries(fileContents)
+          .map(
+            ([path, fileContent]) =>
+              `<file path="${path}">\n${fileContent}\n</file>`
+          )
+          .join("\n\n")
+        enrichedContent = `${content}\n\n${fileBlocks}`
+      }
+      const userMessage = createMessage("user", enrichedContent)
       setMessages((prev) => [...prev, userMessage])
       setIsLoading(true)
       updateTopologyNode("main-agent", { status: "running", action: "Working…" })
@@ -242,7 +252,7 @@ export function useChatState() {
 
       try {
         const port = await getPort()
-        const body: Record<string, unknown> = { message: content }
+        const body: Record<string, unknown> = { message: enrichedContent }
         if (sessionId) body.session_id = sessionId
 
         const res = await fetch(`http://${port}/api/chat/stream`, {

@@ -72,10 +72,10 @@ const {
   const containerRef = useRef<HTMLDivElement>(null)
 
   const handleSend = useCallback(
-    async (content: string) => {
+    async (content: string, fileContents?: Record<string, string>) => {
       const sid = await ensureSession()
-      if (!sid) return sendMessage(content)
-      await sendMessage(content, sid)
+      if (!sid) return sendMessage(content, undefined, fileContents)
+      await sendMessage(content, sid, fileContents)
       refreshSessions()
       refreshSessionMessages()
     },
@@ -180,11 +180,11 @@ const {
         )}
       >
         <SidebarInset
-          className={cn(
-            "flex h-dvh flex-col",
-            !isDragging && "transition-[width] duration-500 ease-in-out"
-          )}
-          style={{ width: canvasOpen ? `${chatRatio * 100}%` : "100%" }}
+          className="flex h-dvh flex-col"
+          style={{
+            width: canvasOpen ? `${chatRatio * 100}%` : "100%",
+            transition: isDragging ? "none" : "width 0.3s ease",
+          }}
         >
           {showWorkspace && (
             <WorkspaceDialog onSelect={handleWorkspaceSelect} />
@@ -268,24 +268,36 @@ const {
         <div
           className={cn(
             "overflow-hidden",
-            !isDragging &&
-              "transition-[width,opacity] duration-500 ease-in-out",
             canvasOpen && "border-l border-border"
           )}
           style={{
             width: canvasOpen ? `${(1 - chatRatio) * 100}%` : "0px",
             opacity: canvasOpen ? 1 : 0,
+            transition: isDragging ? "none" : "width 0.3s ease, opacity 0.3s ease",
           }}
         >
           <CanvasPanel topologyState={topologyState} />
         </div>
 
+        {/* Drag overlay — captures all mouse events while dragging */}
+        {isDragging && (
+          <div className="fixed inset-0 z-50 cursor-col-resize" />
+        )}
+
+        {/* Divider handle */}
         {canvasOpen && (
           <div
-            className="absolute inset-y-0 z-10 w-1.5 cursor-col-resize hover:bg-accent/50"
-            style={{ left: `${chatRatio * 100}%` }}
+            className="absolute inset-y-0 z-10 flex w-4 cursor-col-resize items-center justify-center"
+            style={{ left: `calc(${chatRatio * 100}% - 8px)` }}
             onMouseDown={startDrag}
-          />
+          >
+            <div
+              className={cn(
+                "h-8 w-0.5 rounded-full transition-colors",
+                isDragging ? "bg-foreground" : "bg-border hover:bg-foreground/50"
+              )}
+            />
+          </div>
         )}
       </div>
     </SidebarProvider>

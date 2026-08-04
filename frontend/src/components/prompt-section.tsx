@@ -5,7 +5,7 @@ type PromptSectionProps = {
   models: ModelInfo[]
   currentModel: string
   onSelectModel: (id: string) => void
-  onSubmit: (content: string) => void
+  onSubmit: (content: string, fileContents?: Record<string, string>) => void
   browserActive: boolean
   isLoading: boolean
   onStop: () => void

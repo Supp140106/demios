@@ -3,6 +3,7 @@ module demios
 go 1.25.10
 
 require (
+	github.com/creack/pty v1.1.24
 	github.com/invopop/jsonschema v0.14.0
 	github.com/joho/godotenv v1.5.1
 	github.com/mxschmitt/playwright-go v0.6100.0

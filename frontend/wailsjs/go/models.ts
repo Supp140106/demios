@@ -213,3 +213,56 @@ export namespace llm {
 
 }
 
+export namespace main {
+	
+	export class FileEntry {
+	    path: string;
+	    name: string;
+	    size: number;
+	    is_dir: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new FileEntry(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.path = source["path"];
+	        this.name = source["name"];
+	        this.size = source["size"];
+	        this.is_dir = source["is_dir"];
+	    }
+	}
+	export class FolderContent {
+	    path: string;
+	    content: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new FolderContent(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.path = source["path"];
+	        this.content = source["content"];
+	    }
+	}
+	export class TerminalInfo {
+	    id: string;
+	    shell: string;
+	    workdir: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new TerminalInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.shell = source["shell"];
+	        this.workdir = source["workdir"];
+	    }
+	}
+
+}
+

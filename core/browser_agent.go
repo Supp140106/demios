@@ -35,6 +35,9 @@ type BrowserAgent struct {
 	humanInputMu       sync.Mutex
 
 	currentEvents chan<- AgentEvent
+
+	// Duplicate-action detection: last N actions (tool name + args).
+	lastActions []string
 }
 
 func NewBrowserAgent(name string, client *Client, serverManager *tools.ServerManager) *BrowserAgent {
@@ -81,17 +84,17 @@ You have access to the following browser tools:
 - browser_stop: Stop the browser session and close Chromium.
 - browser_test: Test a website by navigating to it, taking a screenshot, and reporting what you see.
 
-RULES — follow them strictly:
+ RULES — follow them strictly:
 - The user has given you a COMPLETE TASK. Execute EVERY step of it in order. Do not stop partway through.
 - The task message begins with 'TARGET URL'. Your very FIRST action MUST be browser_navigate to that exact URL.
-- NEVER guess, probe, or hunt for other ports or URLs. If the TARGET URL fails to load, report the failure clearly and stop trying other addresses.
+- If the TARGET URL fails to load, analyze the error (wrong URL? server not running? network issue?) and decide what to do. You may try to diagnose the problem or report it clearly.
 - Use browser_navigate first to reach the target URL.
 - Use browser_wait after navigating and after clicks to let dynamic content load.
 - Use browser_fill to fill form inputs by selector (#username, #password, etc.). Use browser_click for buttons.
 - Take a browser_screenshot after significant actions and describe what you see (colors, theme, buttons, layout) based on the extracted text and your observations.
 - Use browser_extract to read page content instead of guessing. Extract after each step that changes the page.
 - If a selector is not found, try alternatives (partial text, placeholder, class) and report the difficulty.
-- Keep actions deliberate and sequential.
+- Keep actions deliberate and sequential. Do NOT repeat the same action multiple times.
 - After completing ALL steps, write a DETAILED FINAL REPORT: walk through each step, state whether it succeeded, describe what you saw (page title, buttons, colors/theme, form fields, items in lists), and flag anything that failed.
 - Only call browser_stop after you have completed the task and written your report. Do not stop the browser early.`
 
@@ -122,9 +125,11 @@ func (ba *BrowserAgent) StepStream(ctx context.Context, input string, events cha
 	if ba.TargetURL != "" {
 		if navErr := ba.browserSession.Navigate(ba.TargetURL); navErr != nil {
 			log.Printf("[browser-agent] auto-navigate to %s failed: %v", ba.TargetURL, navErr)
-			ba.emit(ctx, events, AgentEvent{Type: "browser-error", Data: map[string]string{
-				"error": fmt.Sprintf("Failed to load target URL: %v", navErr),
-			}})
+			// Inject the error into history so the LLM can analyze it
+			// (was it a wrong URL? server not running? network issue?).
+			ba.history = append(ba.history, llm.UserMessage(
+				fmt.Sprintf("[SYSTEM] Auto-navigation to %s failed: %v. Analyze this error and decide what to do. You may try alternative approaches or report the failure.", ba.TargetURL, navErr),
+			))
 		} else {
 			log.Printf("[browser-agent] auto-navigated to %s", ba.TargetURL)
 		}
@@ -145,6 +150,10 @@ func (ba *BrowserAgent) StepStream(ctx context.Context, input string, events cha
 	for i := 0; i < maxIter; i++ {
 		log.Printf("[browser-agent] iteration %d/%d", i+1, maxIter)
 
+		if err := ba.maybePruneContext(ctx); err != nil {
+			log.Printf("[browser-agent] context pruning error: %v", err)
+		}
+
 		finalText, done := ba.loopStepStream(ctx, events)
 		if done {
 			log.Printf("[browser-agent] done at iteration %d", i+1)
@@ -153,10 +162,9 @@ func (ba *BrowserAgent) StepStream(ctx context.Context, input string, events cha
 	}
 
 	log.Printf("[browser-agent] exceeded max iterations")
-	ba.emit(ctx, events, AgentEvent{Type: "browser-error", Data: map[string]string{
-		"error": fmt.Sprintf("Browser agent exceeded max iterations (%d)", maxIter),
-	}})
-	return fmt.Sprintf("Browser agent exceeded max iterations (%d)", maxIter)
+	ba.StopBrowser()
+	ba.emit(ctx, events, AgentEvent{Type: "browser-done", Data: map[string]string{}})
+	return fmt.Sprintf("Browser agent completed after %d iterations. The browser has been closed. Review the actions above for results.", maxIter)
 }
 
 func (ba *BrowserAgent) loopStepStream(ctx context.Context, events chan<- AgentEvent) (string, bool) {
@@ -236,13 +244,43 @@ func (ba *BrowserAgent) loopStepStream(ctx context.Context, events chan<- AgentE
 	if len(toolCalls) > 0 {
 		log.Printf("[browser-agent] received %d tool calls", len(toolCalls))
 
+		// Duplicate-action detection: if the same tool+args was called in the
+		// last 3 iterations, inject a warning so the LLM stops looping.
+		if dup := ba.detectDuplicate(toolCalls); dup != "" {
+			ba.history = append(ba.history, llm.UserMessage(
+				fmt.Sprintf("[SYSTEM] You are repeating the same action: %s. You have already done this. Do something different or write your final report and call browser_stop.", dup),
+			))
+		}
+
 		results := ba.execToolCalls(ctx, toolCalls, events)
+
+		// Track actions for duplicate detection.
+		ba.trackActions(toolCalls)
+
+		// Check if browser_stop was called — if so, break the loop cleanly.
+		stopped := false
+		var finalText string
 		for _, r := range results {
 			ba.addToolResultToHistory(r)
 			if !ba.emit(ctx, events, ba.resultToEvent(r)) {
 				return "", true
 			}
 			ba.emitBrowserAction(ctx, events, r)
+			if r.name == "browser_stop" {
+				stopped = true
+				if r.err == nil {
+					finalText = r.output
+				}
+			}
+		}
+
+		if stopped {
+			if finalText == "" {
+				finalText = "Browser session ended."
+			}
+			log.Printf("[browser-agent] browser_stop called, ending session")
+			ba.emit(ctx, events, AgentEvent{Type: "browser-done", Data: map[string]string{}})
+			return finalText, true
 		}
 
 		return "", false
@@ -535,5 +573,122 @@ func (ba *BrowserAgent) StopBrowser() {
 func (ba *BrowserAgent) Reset() {
 	ba.history = nil
 	ba.historyReasonings = nil
+	ba.lastActions = nil
 	tools.ClearBackups()
+}
+
+// maybePruneContext summarises old history when it grows too large, keeping
+// the most recent messages intact. Browser tasks are shorter than main-agent
+// tasks so the threshold is lower (128KB vs 320KB).
+func (ba *BrowserAgent) maybePruneContext(ctx context.Context) error {
+	const targetBytes = 128000
+
+	total := 0
+	for _, msg := range ba.history {
+		data, _ := json.Marshal(msg)
+		total += len(data)
+	}
+
+	if total < targetBytes {
+		return nil
+	}
+
+	keep := 8
+	if len(ba.history) <= keep+1 {
+		return nil
+	}
+
+	toSummarize := ba.history[:len(ba.history)-keep]
+
+	summary, err := ba.summarizeMessages(ctx, toSummarize)
+	if err != nil {
+		return fmt.Errorf("summarization failed: %w", err)
+	}
+
+	ba.history = append(
+		[]llm.Message{llm.SystemMessage("Previous conversation summary:\n" + summary)},
+		ba.history[len(ba.history)-keep:]...,
+	)
+
+	log.Printf("[browser-agent] pruned context: summarized %d messages, kept %d recent", len(toSummarize), keep)
+	return nil
+}
+
+func (ba *BrowserAgent) summarizeMessages(ctx context.Context, messages []llm.Message) (string, error) {
+	var sb strings.Builder
+	sb.WriteString("Summarize the following browser automation conversation concisely. Focus on:\n")
+	sb.WriteString("- What URL was tested\n")
+	sb.WriteString("- Steps attempted and their results (success/failure)\n")
+	sb.WriteString("- What was seen on the page (title, elements, errors)\n")
+	sb.WriteString("- What worked and what failed\n\n")
+	sb.WriteString("CONVERSATION:\n")
+
+	for _, msg := range messages {
+		switch {
+		case msg.OfUser != nil:
+			sb.WriteString("USER: ")
+			sb.WriteString(llm.ContentString(msg.OfUser.Content))
+			sb.WriteString("\n")
+		case msg.OfAssistant != nil:
+			if c := llm.ContentString(msg.OfAssistant.Content); c != "" {
+				sb.WriteString("ASSISTANT: ")
+				sb.WriteString(c)
+				sb.WriteString("\n")
+			}
+			for _, tc := range msg.OfAssistant.ToolCalls {
+				sb.WriteString(fmt.Sprintf("  -> TOOL: %s(%s)\n", tc.Function.Name, tc.Function.Arguments))
+			}
+		case msg.OfTool != nil:
+			c := llm.ContentString(msg.OfTool.Content)
+			if len(c) > 200 {
+				c = c[:200] + "..."
+			}
+			sb.WriteString("  RESULT: ")
+			sb.WriteString(c)
+			sb.WriteString("\n")
+		}
+	}
+
+	sb.WriteString("\nSUMMARY:")
+
+	resp, err := ba.client.Chat(ctx,
+		"You are a precise summarizer. Produce a concise factual summary. Include URLs tested, steps taken, and what succeeded or failed.",
+		[]llm.Message{llm.UserMessage(sb.String())},
+		nil,
+	)
+	if err != nil {
+		return "", err
+	}
+	if len(resp.Choices) == 0 {
+		return "", fmt.Errorf("no response from summarizer")
+	}
+	return resp.Choices[0].Message.Content, nil
+}
+
+// detectDuplicate returns the name+args of a tool call if the exact same call
+// appears in the last 3 tracked actions. Returns "" if no duplicate.
+func (ba *BrowserAgent) detectDuplicate(toolCalls []openai.ChatCompletionMessageToolCallParam) string {
+	if len(ba.lastActions) == 0 || len(toolCalls) == 0 {
+		return ""
+	}
+	tc := toolCalls[0]
+	sig := tc.Function.Name + ":" + tc.Function.Arguments
+	for _, prev := range ba.lastActions {
+		if prev == sig {
+			return tc.Function.Name
+		}
+	}
+	return ""
+}
+
+// trackActions records the latest tool calls for duplicate detection,
+// keeping at most 3 entries.
+func (ba *BrowserAgent) trackActions(toolCalls []openai.ChatCompletionMessageToolCallParam) {
+	for _, tc := range toolCalls {
+		sig := tc.Function.Name + ":" + tc.Function.Arguments
+		ba.lastActions = append(ba.lastActions, sig)
+	}
+	if len(ba.lastActions) > 3 {
+		ba.lastActions = ba.lastActions[len(ba.lastActions)-3:]
+	}
 }

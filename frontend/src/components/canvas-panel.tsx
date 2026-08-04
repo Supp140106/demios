@@ -1,12 +1,13 @@
 import { useState, useCallback, useRef, useEffect } from "react"
 import { AgentTopology } from "@/components/agent-topology"
 import { CanvasWebsite } from "@/components/canvas-website"
+import { CanvasTerminal } from "@/components/canvas-terminal"
 import type { TopologyState } from "@/hooks/use-chat-state"
 
 import { cn } from "@/lib/utils"
-import { X, Plus, CircuitBoard, Globe } from "lucide-react"
+import { X, Plus, CircuitBoard, Globe, Terminal } from "lucide-react"
 
-type TabType = "topology" | "website"
+type TabType = "topology" | "website" | "terminal"
 
 interface Tab {
   id: string
@@ -122,6 +123,13 @@ export function CanvasPanel({ topologyState }: CanvasPanelProps) {
                 <Globe className="h-3.5 w-3.5" />
                 Website
               </button>
+              <button
+                onClick={() => addTab("terminal", "Terminal")}
+                className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-accent"
+              >
+                <Terminal className="h-3.5 w-3.5" />
+                Terminal
+              </button>
             </div>
           )}
         </div>
@@ -146,6 +154,17 @@ export function CanvasPanel({ topologyState }: CanvasPanelProps) {
                 <CanvasWebsite initialUrl={tab.url} />
               </div>
             ))}
+          {tabs
+            .filter((t) => t.type === "terminal")
+            .map((tab) => (
+              <div
+                key={tab.id}
+                style={{ display: activeTab === tab.id ? "block" : "none" }}
+                className="absolute inset-0"
+              >
+                <CanvasTerminal />
+              </div>
+            ))}
           {!active && (
             <div className="absolute inset-0 flex items-center justify-center text-sm text-muted-foreground">
               Select or create a tab
@@ -163,5 +182,7 @@ function TabIcon({ type, className }: { type: TabType; className?: string }) {
       return <CircuitBoard className={className} />
     case "website":
       return <Globe className={className} />
+    case "terminal":
+      return <Terminal className={className} />
   }
 }
