@@ -39,7 +39,7 @@ func TestLiveE2E(t *testing.T) {
 	if err := a.SetModel("openrouter-nemotron"); err != nil {
 		t.Fatalf("SetModel: %v", err)
 	}
-	ba := NewBrowserAgent("browser-test", a.client, sm)
+	ba := NewBrowserAgent("browser-test", a.client, sm, nil)
 	ba.Workspace = a.Workspace
 	ba.TargetURL = url
 

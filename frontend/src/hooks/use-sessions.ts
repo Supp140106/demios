@@ -48,7 +48,8 @@ function formatRawSession(s: RawSession): SessionInfo {
 function parseToolCalls(json: string): Record<string, unknown>[] {
   if (!json) return []
   try {
-    return JSON.parse(json)
+    const parsed = JSON.parse(json)
+    return Array.isArray(parsed) ? parsed.filter(Boolean) : []
   } catch {
     return []
   }
@@ -60,15 +61,13 @@ export function rawToMessage(m: RawMessage): DBMessage {
     role: m.role as "user" | "assistant",
     content: m.content || "",
     thinking: m.thinking || "",
-    toolCalls: parseToolCalls(m.tool_calls).map(
-      (tc: Record<string, unknown>) => ({
-        id: tc.id as string,
-        name: tc.name as string,
-        args: (tc.args as Record<string, unknown>) || {},
-        status: "completed" as const,
-        output: tc.output as string | undefined,
-      })
-    ),
+    toolCalls: parseToolCalls(m.tool_calls).map((tc) => ({
+      id: (tc.id as string) ?? `tc-${Date.now()}-${Math.random()}`,
+      name: (tc.name as string) ?? "tool",
+      args: (tc.args as Record<string, unknown>) || {},
+      status: "completed" as const,
+      output: tc.output as string | undefined,
+    })),
     timestamp: new Date(m.timestamp),
   }
 }

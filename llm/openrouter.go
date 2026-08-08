@@ -51,6 +51,15 @@ var AvailableModels = []ModelConfig{
 		EnvVarName:  "OPENROUTER_API_KEY",
 	},
 	{
+		ID:          "openrouter-nemotron-vision",
+		Label:       "OpenRouter (Nemotron Vision)",
+		BaseURL:     "https://openrouter.ai/api/v1",
+		APIKey:      "OPENROUTER_API_KEY",
+		Model:       "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
+		BuiltIn:     true,
+		EnvVarName:  "OPENROUTER_API_KEY",
+	},
+	{
 		ID:          "mistral-large",
 		Label:       "Mistral Large",
 		BaseURL:     "https://api.mistral.ai/v1",

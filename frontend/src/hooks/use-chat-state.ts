@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef } from "react"
+import { toast } from "sonner"
 import { GetServerPort } from "../../wailsjs/go/main/App"
 
 export type ToolCallState = {
@@ -31,6 +32,7 @@ type SubagentInnerData = {
   url?: string
   title?: string
   screenshot?: string
+  model?: string
   id?: string
   name?: string
   args?: Record<string, unknown>
@@ -249,6 +251,7 @@ export function useChatState() {
 
       const abortController = new AbortController()
       abortRef.current = abortController
+      let toastedError = false
 
       try {
         const port = await getPort()
@@ -283,7 +286,7 @@ export function useChatState() {
           assistantMsg = msg
           const msgId = msg.id
           setMessages((prev) => {
-            const idx = prev.findIndex((m) => m.id === msgId)
+            const idx = prev.findIndex((m) => m?.id === msgId)
             if (idx === -1) return [...prev, msg]
             const next = [...prev]
             next[idx] = msg
@@ -479,6 +482,10 @@ export function useChatState() {
                    })
                    updateTopologyEdge("e-main-browser", { active: false })
                    updateTopologyEdge("e-browser-server", { active: false })
+                   if (!toastedError) {
+                     toastedError = true
+                     toast.error(String(parsed.error || "Request failed"))
+                   }
                    break
                  }
                  case "subagent-event": {
@@ -566,9 +573,14 @@ export function useChatState() {
                            done: true,
                            active: false,
                          }
-                       case "browser-done":
-                         return { ...tr, done: true, active: false }
-                       default:
+                        case "browser-done":
+                          return { ...tr, done: true, active: false }
+                        case "browser-model-switched":
+                          return {
+                            ...tr,
+                            content: tr.content + `\n[Switched to model: ${inner.model || "unknown"}]\n`,
+                          }
+                        default:
                          return tr
                      }
                    })
@@ -701,6 +713,7 @@ export function useChatState() {
         }
       } catch (err) {
         if ((err as Error).name === "AbortError") return
+        toast.error("Failed to connect to server.")
         setMessages((prev) => [
           ...prev,
           createMessage("assistant", "Error: failed to connect to server."),

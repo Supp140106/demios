@@ -111,12 +111,13 @@ var BrowserClick = Tool{
 }
 
 type BrowserTypeArgs struct {
-	Text string `json:"text" jsonschema:"title=Text,description=Text to type into the focused or selected input"`
+	Selector string `json:"selector,omitempty" jsonschema:"title=Selector,description=CSS selector of the element to type into (optional, types into the first visible input if omitted)"`
+	Text     string `json:"text" jsonschema:"title=Text,description=Text to type into the element"`
 }
 
 var BrowserType = Tool{
 	ID:          "browser_type",
-	Description: "Type text into the active input field or element.",
+	Description: "Type text into an input field. If a selector is provided, types into that specific element. Otherwise types into the first visible input on the page.",
 	Schema:      jsonschema.Reflect(&BrowserTypeArgs{}),
 	Execute: func(ctx context.Context, rawArgs json.RawMessage) (ExecuteResult, error) {
 		var args BrowserTypeArgs
@@ -130,17 +131,22 @@ var BrowserType = Tool{
 		if sess == nil {
 			return ExecuteResult{}, fmt.Errorf("browser session not available")
 		}
+		selector := args.Selector
+		if selector == "" {
+			selector = "input,textarea,[contenteditable]"
+		}
 		url, _ := sess.CurrentURL()
-		if err := sess.Type("input,textarea,[contenteditable]", args.Text); err != nil {
+		if err := sess.Type(selector, args.Text); err != nil {
 			return ExecuteResult{}, fmt.Errorf("type failed: %w", err)
 		}
 		return ExecuteResult{
-			Title:  fmt.Sprintf("Typed into page"),
-			Output: fmt.Sprintf("Typed \"%s\" into active input on %s", args.Text, url),
+			Title:  fmt.Sprintf("Typed into %s", selector),
+			Output: fmt.Sprintf("Typed \"%s\" into \"%s\" on %s", args.Text, selector, url),
 			Metadata: map[string]any{
-				"text":   args.Text,
-				"url":    url,
-				"action": "type",
+				"text":     args.Text,
+				"selector": selector,
+				"url":      url,
+				"action":   "type",
 			},
 		}, nil
 	},
@@ -280,8 +286,11 @@ var BrowserScroll = Tool{
 		}
 		if args.DeltaY < 0 {
 			_ = sess.ScrollUp(float64(-args.DeltaY))
-		} else {
+		} else if args.DeltaY > 0 {
 			_ = sess.ScrollDown(float64(args.DeltaY))
+		}
+		if args.DeltaX != 0 {
+			_ = sess.ScrollHorizontal(float64(args.DeltaX))
 		}
 		return ExecuteResult{
 			Title:  fmt.Sprintf("Scrolled by (%d, %d)", args.DeltaX, args.DeltaY),
@@ -352,6 +361,34 @@ var BrowserBack = Tool{
 			Metadata: map[string]any{
 				"url":   url,
 				"action": "back",
+			},
+		}, nil
+	},
+}
+
+type BrowserReloadArgs struct{}
+
+var BrowserReload = Tool{
+	ID:          "browser_reload",
+	Description: "Reload the current page.",
+	Schema:      jsonschema.Reflect(&BrowserReloadArgs{}),
+	Execute: func(ctx context.Context, rawArgs json.RawMessage) (ExecuteResult, error) {
+		sess := BrowserSessionFrom(ctx)
+		if sess == nil {
+			return ExecuteResult{}, fmt.Errorf("browser session not available")
+		}
+		if err := sess.Reload(); err != nil {
+			return ExecuteResult{}, fmt.Errorf("reload failed: %w", err)
+		}
+		url, _ := sess.CurrentURL()
+		title, _ := sess.CurrentTitle()
+		return ExecuteResult{
+			Title:  "Page reloaded",
+			Output: fmt.Sprintf("Reloaded %s — %s", url, title),
+			Metadata: map[string]any{
+				"url":   url,
+				"title": title,
+				"action": "reload",
 			},
 		}, nil
 	},

@@ -34,13 +34,17 @@ type BrowserAgent struct {
 	humanInputRequests map[string]chan string
 	humanInputMu       sync.Mutex
 
+	// humanInputFn is called to request input from the human user.
+	// It blocks until the user responds or the context is cancelled.
+	humanInputFn func(ctx context.Context, question string, options []string) (string, error)
+
 	currentEvents chan<- AgentEvent
 
 	// Duplicate-action detection: last N actions (tool name + args).
 	lastActions []string
 }
 
-func NewBrowserAgent(name string, client *Client, serverManager *tools.ServerManager) *BrowserAgent {
+func NewBrowserAgent(name string, client *Client, serverManager *tools.ServerManager, humanInputFn func(ctx context.Context, question string, options []string) (string, error)) *BrowserAgent {
 	ba := &BrowserAgent{
 		Name:               name,
 		client:             client,
@@ -49,54 +53,83 @@ func NewBrowserAgent(name string, client *Client, serverManager *tools.ServerMan
 		PermissionMode:     "allow_all",
 		permissionRequests: make(map[string]chan bool),
 		humanInputRequests: make(map[string]chan string),
+		humanInputFn:       humanInputFn,
 	}
 
 	browserTools := map[string]tools.Tool{
-		"browser_navigate":   tools.BrowserNavigate,
-		"browser_click":      tools.BrowserClick,
-		"browser_type":       tools.BrowserType,
-		"browser_fill":       tools.BrowserFill,
-		"browser_screenshot": tools.BrowserScreenshot,
-		"browser_extract":    tools.BrowserExtract,
-		"browser_scroll":     tools.BrowserScroll,
-		"browser_press":      tools.BrowserPress,
-		"browser_back":       tools.BrowserBack,
-		"browser_wait":       tools.BrowserWait,
-		"browser_stop":       tools.BrowserStop,
-		"browser_test":       tools.BrowserTest,
+		"browser_navigate":      tools.BrowserNavigate,
+		"browser_click":         tools.BrowserClick,
+		"browser_type":          tools.BrowserType,
+		"browser_fill":          tools.BrowserFill,
+		"browser_screenshot":    tools.BrowserScreenshot,
+		"browser_extract":       tools.BrowserExtract,
+		"browser_scroll":        tools.BrowserScroll,
+		"browser_press":         tools.BrowserPress,
+		"browser_back":          tools.BrowserBack,
+		"browser_reload":        tools.BrowserReload,
+		"browser_wait":          tools.BrowserWait,
+		"browser_stop":          tools.BrowserStop,
+		"SearchUIComponents":    tools.SearchUIComponents,
 	}
 	ba.tools = browserTools
 	ba.toolDefs = tools.AllToolDefs(ba.tools)
 
-	ba.SystemPrompt = `You are a browser automation agent. You control a real Chromium browser window and can navigate the web, click elements, type and fill text, take screenshots, and extract content.
+	ba.SystemPrompt = `You are a Browser Automation Agent with VISION. You control a real Chromium browser and can SEE pages visually via screenshots.
 
 You have access to the following browser tools:
 - browser_navigate: Navigate to a URL.
 - browser_click: Click an element by CSS selector or text.
-- browser_fill: Fill an input field by CSS selector with a value (use for form fields like login forms).
-- browser_type: Type text into the active input field.
-- browser_screenshot: Capture the current viewport as a base64 PNG image.
+- browser_fill: Fill an input field by CSS selector with a value.
+- browser_type: Type text into a specific element by CSS selector.
+- browser_screenshot: Capture the current viewport as a base64 PNG image. YOU WILL SEE THIS IMAGE — analyze it visually.
 - browser_extract: Extract visible text from the page or a specific element.
-- browser_scroll: Scroll the page up or down.
+- browser_scroll: Scroll the page vertically and/or horizontally.
 - browser_press: Press a keyboard key (Enter, Tab, Escape, etc.).
 - browser_back: Navigate back in browser history.
+- browser_reload: Reload the current page.
 - browser_wait: Wait for a selector to appear or wait a fixed number of milliseconds.
 - browser_stop: Stop the browser session and close Chromium.
-- browser_test: Test a website by navigating to it, taking a screenshot, and reporting what you see.
+- SearchUIComponents: Search for UI components from shadcn/ui, ReactBits, Magic UI, and Aceternity UI registries.
 
- RULES — follow them strictly:
-- The user has given you a COMPLETE TASK. Execute EVERY step of it in order. Do not stop partway through.
-- The task message begins with 'TARGET URL'. Your very FIRST action MUST be browser_navigate to that exact URL.
-- If the TARGET URL fails to load, analyze the error (wrong URL? server not running? network issue?) and decide what to do. You may try to diagnose the problem or report it clearly.
-- Use browser_navigate first to reach the target URL.
+YOU HAVE VISION — THIS IS CRITICAL:
+After browser_screenshot, you RECEIVE THE ACTUAL PAGE IMAGE. Analyze it:
+- What layout, grid, sections do you see?
+- What text, headings, buttons are visible?
+- What colors, theme, spacing, typography?
+- Are there errors, broken layouts, missing images, 404s?
+- Does the page match what was expected?
+Use this visual information to guide your next action. Do NOT ignore what you see.
+
+PLANNING:
+- Before acting, think step-by-step about your approach.
+- After each significant action, take a screenshot and analyze what you see.
+- If the page doesn't match expectations, investigate before continuing.
+- If stuck, try a fundamentally different approach — not the same action again.
+
+EXECUTION RULES — follow strictly:
+- The task begins with 'TARGET URL'. Your FIRST action MUST be browser_navigate to that URL.
+- If navigation fails, analyze the error and decide: wrong URL? server down? network issue?
+- ALWAYS take browser_screenshot after significant actions.
+- ALWAYS use browser_extract to read content — never guess at selectors or text.
+- Use the PAGE SNAPSHOT for real form field selectors — never hallucinate selectors like #username.
+- If a selector fails, try alternatives: text content, placeholder, partial class, aria-label.
+- Keep actions deliberate and sequential. NEVER repeat the same action.
 - Use browser_wait after navigating and after clicks to let dynamic content load.
-- Use browser_fill to fill form inputs by selector (#username, #password, etc.). Use browser_click for buttons.
-- Take a browser_screenshot after significant actions and describe what you see (colors, theme, buttons, layout) based on the extracted text and your observations.
-- Use browser_extract to read page content instead of guessing. Extract after each step that changes the page.
-- If a selector is not found, try alternatives (partial text, placeholder, class) and report the difficulty.
-- Keep actions deliberate and sequential. Do NOT repeat the same action multiple times.
-- After completing ALL steps, write a DETAILED FINAL REPORT: walk through each step, state whether it succeeded, describe what you saw (page title, buttons, colors/theme, form fields, items in lists), and flag anything that failed.
-- Only call browser_stop after you have completed the task and written your report. Do not stop the browser early.`
+- Use browser_fill for form inputs. Use browser_click for buttons and links.
+
+ASK FOR HELP:
+- If unsure what to do next, describe what you see and ask for guidance.
+- If the page shows an unexpected error, explain what you see visually.
+- If a form requires credentials you don't have, stop and ask.
+- Never guess at credentials, API keys, or hidden values.
+
+FINAL REPORT — after completing ALL steps:
+Write a DETAILED report:
+1. Walk through each step — state whether it succeeded or failed.
+2. Describe what you SAW on each page (layout, colors, elements, text).
+3. Note any visual bugs: broken layouts, overlapping elements, wrong colors, missing content.
+4. Flag anything that failed or looked wrong.
+5. Only call browser_stop after writing the report.`
 
 	return ba
 }
@@ -117,6 +150,48 @@ func (ba *BrowserAgent) StepStream(ctx context.Context, input string, events cha
 			"error": fmt.Sprintf("Failed to start browser: %v", err),
 		}})
 		return fmt.Sprintf("Failed to start browser: %v", err)
+	}
+
+	// Ask the human which model to use for the Browser Agent.
+	if ba.humanInputFn != nil {
+		ba.emit(ctx, events, AgentEvent{Type: "human-input-request", Data: map[string]interface{}{
+			"question": "Would you like to continue with the same model or choose a different model for the Browser Agent?",
+			"options":  []string{"Same Model", "Choose Different Model"},
+		}})
+
+		choice, err := ba.humanInputFn(ctx, "Would you like to continue with the same model or choose a different model for the Browser Agent?", []string{"Same Model", "Choose Different Model"})
+		if err != nil {
+			log.Printf("[browser-agent] human input error (using same model): %v", err)
+		} else if choice == "Choose Different Model" {
+			// Build model options from all available models
+			allModels := ba.client.GetModels()
+			modelOptions := make([]string, 0, len(allModels))
+			for _, m := range allModels {
+				modelOptions = append(modelOptions, m.ID)
+			}
+			if len(modelOptions) > 15 {
+				modelOptions = modelOptions[:15]
+			}
+
+			ba.emit(ctx, events, AgentEvent{Type: "human-input-request", Data: map[string]interface{}{
+				"question": "Select a model for the Browser Agent:",
+				"options":  modelOptions,
+			}})
+
+			selectedModel, err := ba.humanInputFn(ctx, "Select a model for the Browser Agent:", modelOptions)
+			if err != nil {
+				log.Printf("[browser-agent] human input error (model selection): %v", err)
+			} else if selectedModel != "" {
+				if setErr := ba.client.SetModel(selectedModel); setErr != nil {
+					log.Printf("[browser-agent] failed to switch model to %s: %v", selectedModel, setErr)
+				} else {
+					log.Printf("[browser-agent] switched to model: %s", selectedModel)
+					ba.emit(ctx, events, AgentEvent{Type: "browser-model-switched", Data: map[string]string{
+						"model": selectedModel,
+					}})
+				}
+			}
+		}
 	}
 
 	// Guarantee the browser is already on the target page BEFORE the model does
@@ -146,7 +221,7 @@ func (ba *BrowserAgent) StepStream(ctx context.Context, input string, events cha
 		"status": "Browser opened — Chromium popup visible",
 	}})
 
-	maxIter := 25
+	maxIter := 40
 	for i := 0; i < maxIter; i++ {
 		log.Printf("[browser-agent] iteration %d/%d", i+1, maxIter)
 
@@ -283,6 +358,13 @@ func (ba *BrowserAgent) loopStepStream(ctx context.Context, events chan<- AgentE
 			return finalText, true
 		}
 
+		// Re-inject a fresh page snapshot so the LLM always sees the
+		// current state of the page (URL, title, form fields, visible text).
+		// This prevents hallucinated selectors and stale page state.
+		if snap := ba.snapshotPage(); snap != "" {
+			ba.history = append(ba.history, llm.UserMessage(snap))
+		}
+
 		return "", false
 	}
 
@@ -368,6 +450,20 @@ func (ba *BrowserAgent) addToolResultToHistory(r toolExecResult) {
 	if content == "" {
 		content = fmt.Sprintf("[Tool %q returned empty output]", r.name)
 	}
+
+	// For browser_screenshot, add the tool result AND send the screenshot
+	// image as a user message so the LLM can actually see the page visually.
+	if r.name == "browser_screenshot" && r.err == nil && r.metadata != nil {
+		if screenshotB64, ok := r.metadata["screenshot"].(string); ok && screenshotB64 != "" {
+			ba.history = append(ba.history, llm.ToolMessage(content, r.id))
+			ba.history = append(ba.history, llm.UserMessageWithImages(
+				"Here is the current screenshot of the browser page. Analyze it carefully — look at the layout, text, buttons, forms, colors, and any visible content. Use this visual information to decide your next action.",
+				[]string{screenshotB64},
+			))
+			return
+		}
+	}
+
 	ba.history = append(ba.history, llm.ToolMessage(content, r.id))
 }
 
@@ -682,13 +778,13 @@ func (ba *BrowserAgent) detectDuplicate(toolCalls []openai.ChatCompletionMessage
 }
 
 // trackActions records the latest tool calls for duplicate detection,
-// keeping at most 3 entries.
+// keeping at most 5 entries.
 func (ba *BrowserAgent) trackActions(toolCalls []openai.ChatCompletionMessageToolCallParam) {
 	for _, tc := range toolCalls {
 		sig := tc.Function.Name + ":" + tc.Function.Arguments
 		ba.lastActions = append(ba.lastActions, sig)
 	}
-	if len(ba.lastActions) > 3 {
-		ba.lastActions = ba.lastActions[len(ba.lastActions)-3:]
+	if len(ba.lastActions) > 5 {
+		ba.lastActions = ba.lastActions[len(ba.lastActions)-5:]
 	}
 }

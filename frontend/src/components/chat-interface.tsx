@@ -11,7 +11,7 @@ type ChatInterfaceProps = {
 export function ChatInterface({ messages, isLoading }: ChatInterfaceProps) {
   return (
     <div className="mx-auto w-full max-w-3xl px-4 pt-8 pb-4">
-      {messages.map((msg) => (
+      {messages.filter(Boolean).map((msg) => (
         <div key={msg.id} className="mb-6 last:mb-0">
           <ChatMessage message={msg} />
         </div>

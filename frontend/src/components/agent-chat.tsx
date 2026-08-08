@@ -83,8 +83,9 @@ const {
   )
 
   const handleNewChat = useCallback(async () => {
+    clearMessages()
     await createSession()
-  }, [createSession])
+  }, [clearMessages, createSession])
 
   const handleSelectSession = useCallback(
     async (id: string) => {

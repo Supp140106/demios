@@ -30,20 +30,223 @@ An autonomous AI coding agent with a full desktop UI, powered by Wails (Go) + Re
 ## Architecture
 
 ```
-main.go                     Wails bootstrap
-app.go                      App struct bound to Wails (workspace, sessions, terminals, providers)
-core/                       agent loop + streaming events
-  agent.go                  Agent, tool execution, permissions, context pruning
-  browser_agent.go          BrowserAgent using Playwright
-  client.go                 client wrapper around the LLM
-llm/                        provider configs, OpenRouter client, Gemini backend
-tools/                      one file per tool (Read, Write, Edit, Bash, StartServer, ...)
-internal/server/            HTTP + SSE handler that proxies to the agent
-internal/db/                SQLite session/message storage
-frontend/src/               React UI (AgentChat app, canvas, terminal, providers)
+┌─────────────────────────────────────────────────────────────────────────────────────────┐
+│                              WAILS v2 DESKTOP APP                                        │
+│                                                                                         │
+│  ┌──────────────┐    ┌──────────────┐                                                   │
+│  │  main.go     │───▶│  app.go      │  App struct bound to Wails                        │
+│  │  Bootstrap   │    │  Wails Bind  │  (workspace, sessions, terminals, providers)       │
+│  └──────────────┘    └──────┬───────┘                                                   │
+│                             │                                                           │
+│           ┌─────────────────┼─────────────────────┐                                     │
+│           │                 │                     │                                     │
+│           ▼                 ▼                     ▼                                     │
+│  ┌─────────────────┐ ┌─────────────┐  ┌─────────────────────┐                          │
+│  │  Wails Bindings  │ │  HTTP Srv   │  │  SQLite DB          │                          │
+│  │  (Go ↔ JS RPC)  │ │  127.0.0.1  │  │  sessions & msgs    │                          │
+│  └────────┬────────┘ │  :0 (rand)  │  └─────────────────────┘                          │
+│           │          └──────┬──────┘                                                    │
+│           │                 │                                                           │
+│           │    ┌────────────┴──────────────────────────────────────────┐                │
+│           │    │  POST /api/chat/stream  (SSE)                        │                │
+│           │    │  POST /api/permission/respond                        │                │
+│           │    │  POST /api/human-input/respond                       │                │
+│           │    └────────────┬──────────────────────────────────────────┘                │
+│           │                 │                                                           │
+│           │                 ▼                                                           │
+│           │    ┌────────────────────────────────────────────────────────────────┐       │
+│           │    │                     CORE / AGENT LOOP                         │       │
+│           │    │                                                                │       │
+│           │    │  ┌──────────┐  ┌──────────┐  ┌────────────────────────────┐   │       │
+│           │    │  │ agent.go │  │client.go │  │ browser_agent.go           │   │       │
+│           │    │  │          │  │ LLM HTTP │  │ Playwright Chromium        │   │       │
+│           │    │  │ Dispatch │  │ SSE resp │  │ navigate / click / fill /  │   │       │
+│           │    │  │ loop     │  │ stream   │  │ screenshot / extract       │   │       │
+│           │    │  │ (15 iter)│  │ parser   │  │                            │   │       │
+│           │    │  └────┬─────┘  └──────────┘  └────────────┬───────────────┘   │       │
+│           │    │       │                                    │                   │       │
+│           │    │       ▼                                    ▼                   │       │
+│           │    │  ┌──────────────────────────────────────────────────────┐     │       │
+│           │    │  │              TOOLS LAYER  (tools/)                   │     │       │
+│           │    │  │                                                      │     │       │
+│           │    │  │  ┌────────┐ ┌────────┐ ┌────────┐ ┌──────────────┐  │     │       │
+│           │    │  │  │ Read   │ │ Write  │ │ Edit   │ │ Bash         │  │     │       │
+│           │    │  │  │        │ │        │ │ (diff) │ │ (PTY exec)  │  │     │       │
+│           │    │  │  └────────┘ └────────┘ └────────┘ └──────────────┘  │     │       │
+│           │    │  │  ┌────────┐ ┌────────┐ ┌────────┐ ┌──────────────┐  │     │       │
+│           │    │  │  │ Grep   │ │ Glob   │ │ Undo   │ │ ReadRelated  │  │     │       │
+│           │    │  │  └────────┘ └────────┘ └────────┘ └──────────────┘  │     │       │
+│           │    │  │  ┌────────────────┐ ┌────────────────────────────┐  │     │       │
+│           │    │  │  │ ProjectStruct  │ │ Task (sub-agent spawn)     │  │     │       │
+│           │    │  │  └────────────────┘ └────────────────────────────┘  │     │       │
+│           │    │  │  ┌────────────────┐ ┌────────────────────────────┐  │     │       │
+│           │    │  │  │ ListSkills     │ │ AskUser                    │  │     │       │
+│           │    │  │  │ ReadSkill      │ │ (human-in-loop dialog)     │  │     │       │
+│           │    │  │  └────────────────┘ └────────────────────────────┘  │     │       │
+│           │    │  │  ┌──────────────────────────────────────────────┐  │     │       │
+│           │    │  │  │ SERVER TOOLS                                 │  │     │       │
+│           │    │  │  │ StartServer  StopServer  RestartServer       │  │     │       │
+│           │    │  │  │ GetServerStatus  ListServers  TestWebsite   │  │     │       │
+│           │    │  │  └──────────────────────┬───────────────────────┘  │     │       │
+│           │    │  └─────────────────────────┼──────────────────────────┘     │       │
+│           │    │                            │                              │       │
+│           │    │                            ▼                              │       │
+│           │    │              ┌──────────────────────────────┐            │       │
+│           │    │              │  ServerManager               │            │       │
+│           │    │              │  (port detection, exclusion) │            │       │
+│           │    │              └──────────────────────────────┘            │       │
+│           │    └────────────────────────────────────────────────────────────┘       │
+│           │                                                                         │
+│           │    ┌────────────────────────────────────────────────────────────┐       │
+│           │    │                    LLM LAYER  (llm/)                       │       │
+│           │    │                                                            │       │
+│           │    │  ┌───────────┐  ┌───────────┐  ┌──────────┐              │       │
+│           │    │  │ openrouter│  │ genai      │  │ presets  │              │       │
+│           │    │  │ .go       │  │ (Gemini)   │  │ .go      │              │       │
+│           │    │  └─────┬─────┘  └─────┬─────┘  └──────────┘              │       │
+│           │    │        │              │                                    │       │
+│           │    └────────┼──────────────┼────────────────────────────────────┘       │
+│           │             │              │                                            │
+│           │             ▼              ▼                                            │
+│           │      ┌───────────┐  ┌───────────┐                                     │
+│           │      │ OpenRouter│  │ Gemini    │                                     │
+│           │      │ API       │  │ API       │                                     │
+│           │      └───────────┘  └───────────┘                                     │
+│           │                                                                        │
+│           │                                                                        │
+│  ┌────────┴──────────────────────────────────────────────────────────────────────┐ │
+│  │                           FRONTEND (React 19 + TS + Vite)                     │ │
+│  │                                                                               │ │
+│  │  ┌─────────────────┐ ┌──────────────┐ ┌───────────────────────────────────┐  │ │
+│  │  │ use-chat-state  │ │ use-model    │ │  use-permission                   │  │ │
+│  │  │ SSE reader      │ │ provider cfg │ │  allow / deny / confirm-write     │  │ │
+│  │  └────────┬────────┘ └──────────────┘ └───────────────────────────────────┘  │ │
+│  │           │                                                                   │ │
+│  │           ▼                                                                   │ │
+│  │  ┌──────────────────────────────────────────────────────────────────────┐     │ │
+│  │  │                     COMPONENTS                                       │     │ │
+│  │  │                                                                      │     │ │
+│  │  │  ┌────────────────┐ ┌──────────────────┐ ┌──────────────────────┐  │     │ │
+│  │  │  │ agent-chat     │ │ agent-topology   │ │ canvas-terminal      │  │     │ │
+│  │  │  │ (messages)     │ │ (React Flow)     │ │ (xterm.js)           │  │     │ │
+│  │  │  └────────────────┘ └──────────────────┘ └──────────────────────┘  │     │ │
+│  │  │  ┌────────────────┐ ┌──────────────────┐ ┌──────────────────────┐  │     │ │
+│  │  │  │ canvas-website │ │ prompt-input     │ │ session-sidebar      │  │     │ │
+│  │  │  │ (Playwright)   │ │ (actions bar)    │ │ (history)            │  │     │ │
+│  │  │  └────────────────┘ └──────────────────┘ └──────────────────────┘  │     │ │
+│  │  │  ┌────────────────┐ ┌──────────────────┐ ┌──────────────────────┐  │     │ │
+│  │  │  │ diff-viewer    │ │ permission-dlg   │ │ human-input-dialog   │  │     │ │
+│  │  │  │ (unified diff) │ │ (allow / deny)   │ │ (free text input)    │  │     │ │
+│  │  │  └────────────────┘ └──────────────────┘ └──────────────────────┘  │     │ │
+│  │  │  ┌────────────────┐ ┌──────────────────┐                           │     │ │
+│  │  │  │ model-selector │ │ providers-settings│                           │     │ │
+│  │  │  └────────────────┘ └──────────────────┘                           │     │ │
+│  │  └──────────────────────────────────────────────────────────────────────┘     │ │
+│  └───────────────────────────────────────────────────────────────────────────────┘ │
+└─────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-The app starts an HTTP server on `127.0.0.1:0` (random port). The frontend fetches the port through the Wails `GetServerPort()` binding and streams agent events over SSE.
+### Data flow
+
+```
+User types prompt
+        │
+        ▼
+┌───────────────┐  Wails binding   ┌──────────────┐  POST /api/chat/stream  ┌──────────────┐
+│ React UI      │ ────────────────▶ │  app.go      │ ──────────────────────▶ │ agent.go     │
+│ prompt-input  │                   │  (Go→JS RPC) │                         │  Loop        │
+└───────────────┘                   └──────────────┘                         └──────┬───────┘
+       │                                                                            │
+       │  SSE stream                                                                │  tool_calls
+       │◀───────────────────────────────────────────────────────────────────────────┤
+       │                                                                            ▼
+       │                                                                     ┌──────────────┐
+       │                                                                     │  tools/      │
+       │                                                                     │  Read, Write │
+       │                                                                     │  Edit, Bash  │
+       │                                                                     │  Grep, Glob  │
+       │                                                                     └──────┬───────┘
+       │                                                                            │
+       │                                                                     ┌──────┴───────┐
+       │                                                                     │ Execute tool │
+       │                                                                     │ (on system)  │
+       │                                                                     └──────┬───────┘
+       │                                                                            │
+       │  SSE events                                                                │ result
+       │◀───────────────────────────────────────────────────────────────────────────┘
+       │
+       ▼
+┌───────────────────────────────────────┐
+│            SSE Event Types            │
+├───────────────────────────────────────┤
+│  think      — model reasoning chain  │
+│  iteration  — loop step number       │
+│  token      — streamed text delta    │
+│  tool-call  — structured call args   │
+│  tool-result — tool output           │
+│  subagent-event — delegated task     │
+│  permission-request — allow/deny     │
+│  human-input-request — free text     │
+│  error      — failure message        │
+│  done       — turn complete          │
+└───────────────────────────────────────┘
+```
+
+### Tool execution graph
+
+```
+                        ┌─────────────────┐
+                        │   agent.go      │
+                        │  Dispatch tool  │
+                        └────────┬────────┘
+                                 │
+            ┌────────────────────┼────────────────────┐
+            │                    │                    │
+            ▼                    ▼                    ▼
+     ┌─────────────┐    ┌─────────────┐    ┌─────────────┐
+     │  FILE I/O   │    │  SHELL      │    │  NETWORK    │
+     │             │    │             │    │             │
+     │  Read       │    │  Bash       │    │  StartServer│
+     │  Write      │    │  (PTY exec) │    │  StopServer │
+     │  Edit       │    │             │    │  TestWebsite│
+     │  Grep       │    │             │    │  (Playwright│
+     │  Glob       │    │             │    │   Chromium) │
+     │  Undo       │    │             │    │             │
+     └─────────────┘    └─────────────┘    └──────┬──────┘
+                                                   │
+                                                  ╱╲
+                                                 ╱  ╲
+                                                ╱    ╲
+                                               ▼      ▼
+                                    ┌──────────┐  ┌──────────┐
+                                    │ Dev Srv  │  │ Browser  │
+                                    │ (user    │  │ Agent    │
+                                    │  project)│  │ (Playwrt)│
+                                    └──────────┘  └──────────┘
+                                        │              │
+                                        │   ┌──────────┘
+                                        │   │
+                                        ▼   ▼
+                                   ┌─────────────┐
+                                   │  Navigate   │
+                                   │  Click      │
+                                   │  Fill form  │
+                                   │  Screenshot │
+                                   │  Extract    │
+                                   └─────────────┘
+```
+
+### Sub-agent delegation
+
+```
+┌─────────────────┐     Task tool      ┌─────────────────┐
+│  Main Agent     │ ──────────────────▶ │  Sub-Agent      │
+│  (agent.go)     │                     │  (isolated ctx) │
+│                 │◀──────────────────  │                 │
+│  Iteration loop │  tool-result        │  Own tool loop  │
+│  (15 iter max)  │                     │  (own history)  │
+└─────────────────┘                     └─────────────────┘
+```
 
 ### SSE events
 

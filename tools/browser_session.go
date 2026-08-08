@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"runtime"
 
 	"github.com/mxschmitt/playwright-go"
 )
@@ -36,9 +37,12 @@ func BrowserExcludedPortsFrom(ctx context.Context) []int {
 	return ports
 }
 
-func ClearBrowserSession(ctx context.Context) {
-	_ = ctx
-}
+// ClearBrowserSession is a no-op. Go context values are immutable, so a
+// session cannot be removed from a context. Actual cleanup is handled by
+// BrowserSession.Stop() which closes Chromium and all associated resources.
+// This function exists for API symmetry and is called after Stop() in tools
+// that close the browser session.
+func ClearBrowserSession(_ context.Context) {}
 
 type BrowserSession struct {
 	pw      *playwright.Playwright
@@ -52,19 +56,37 @@ func NewBrowserSession() *BrowserSession {
 	return &BrowserSession{}
 }
 
+func dataDir() string {
+	if runtime.GOOS == "windows" {
+		return filepath.Join(os.Getenv("LOCALAPPDATA"), "demios")
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		return filepath.Join(home, ".local", "share", "demios")
+	}
+	return filepath.Join(os.TempDir(), "demios")
+}
+
+func playwrightDir() string {
+	if runtime.GOOS == "windows" {
+		return filepath.Join(os.Getenv("LOCALAPPDATA"), "ms-playwright")
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		return filepath.Join(home, ".cache", "ms-playwright")
+	}
+	return filepath.Join(os.TempDir(), "ms-playwright")
+}
+
 func (s *BrowserSession) Start(ctx context.Context) error {
 	if s.open {
 		return nil
 	}
 
-	userDataDir := filepath.Join(os.Getenv("LOCALAPPDATA"), "demios", "browser-profile")
+	userDataDir := filepath.Join(dataDir(), "browser-profile")
 	if err := os.MkdirAll(userDataDir, 0755); err != nil {
 		return fmt.Errorf("create profile dir: %w", err)
 	}
 
-	// playwright.Install() downloads browsers into %LOCALAPPDATA%\ms-playwright.
-	// Check that location so we don't re-"download" on every browser start.
-	playwrightInstallDir := filepath.Join(os.Getenv("LOCALAPPDATA"), "ms-playwright")
+	playwrightInstallDir := playwrightDir()
 	if _, err := os.Stat(playwrightInstallDir); os.IsNotExist(err) {
 		log.Println("[browser] installing playwright browsers (this is a one-time step)...")
 		if err := playwright.Install(); err != nil {
@@ -255,6 +277,24 @@ func (s *BrowserSession) ScrollDown(pixels float64) error {
 
 func (s *BrowserSession) ScrollUp(pixels float64) error {
 	return s.ScrollDown(-pixels)
+}
+
+func (s *BrowserSession) ScrollHorizontal(pixels float64) error {
+	if !s.open || s.page == nil {
+		return fmt.Errorf("browser not started")
+	}
+	_, _ = s.page.EvalOnSelector("html", "window.scrollBy(arguments[0], 0)", pixels)
+	return nil
+}
+
+func (s *BrowserSession) Reload() error {
+	if !s.open || s.page == nil {
+		return fmt.Errorf("browser not started")
+	}
+	_, err := s.page.Reload(playwright.PageReloadOptions{
+		WaitUntil: playwright.WaitUntilStateNetworkidle,
+	})
+	return err
 }
 
 func (s *BrowserSession) Back() error {

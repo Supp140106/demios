@@ -16,8 +16,22 @@
 - **LLM:** OpenRouter (`nvidia/nemotron-3-super-120b-a12b:free`) via direct HTTP to `https://openrouter.ai/api/v1/chat/completions`. API key from `OPENROUTER_API_KEY` env var. Uses native OpenAI function calling format.
 - **Tools:** All execute in PowerShell syntax. Bash tool timeout: default 120s, max 600s. Workspace-relative paths resolved via `WithWorkspace` context.
 - **Packages:** `core/` (agent loop + client wrapper), `llm/` (OpenRouter HTTP client, types), `internal/server/` (SSE handler), `tools/` (each tool is a standalone file)
-- **Tool schemas:** Each tool has a `Schema` field (`jsonschema.Schema`). `tools.AllToolDefs()` converts them to OpenAI function definitions sent in the API `tools` parameter. Tool IDs: `Read`, `Write`, `Edit`, `Grep`, `Glob`, `Bash`.
+- **Tool schemas:** Each tool has a `Schema` field (`jsonschema.Schema`). `tools.AllToolDefs()` converts them to OpenAI function definitions sent in the API `tools` parameter. Tool IDs: `Read`, `Write`, `Edit`, `Grep`, `Glob`, `Bash`, `SearchUIComponents`.
 - **Streaming:** Text deltas arrive as `StreamEvent{Type: "text"}`. Tool calls arrive as `StreamEvent{Type: "tool_call"}` after full accumulation. Text is streamed to frontend in real-time; tool calls are parsed from structured API response (no XML parsing).
+
+## MCP UI Components
+The agent has access to premium UI component registries via `SearchUIComponents`:
+- **shadcn/ui**: Base components (Button, Card, Dialog, Input, Select, etc.)
+  Install: `npx shadcn@latest add <component-name>`
+- **ReactBits**: 135+ animated components (Aurora, Particles, BlurText, etc.)
+  Browse: https://reactbits.dev
+- **Magic UI**: Animated effects (Marquee, Bento Grid, Globe, Dock, etc.)
+  Install: `npx @magicuidesign/cli@latest add <component-name>`
+- **Aceternity**: Motion components (Background Beams, Sparkles, CardHover, etc.)
+  Browse: https://ui.aceternity.com
+
+When building UI: SearchUIComponents first, then install real components.
+Never build from scratch what already exists in these registries.
 
 ## Frontend
 - **Framework:** React 19 + TypeScript ~6 + Vite 8 + Tailwind CSS v4
