@@ -2,6 +2,8 @@
 
 An autonomous AI coding agent with a full desktop UI, powered by Wails (Go) + React. Demios pairs a tool-calling LLM agent loop with a real terminal, browser automation, project introspection, and a live visual topology canvas of everything it does.
 
+[![Watch the video](https://img.youtube.com/vi/JZnQCE1pfXM/maxresdefault.jpg)](https://youtu.be/JZnQCE1pfXM)
+
 ## Features
 
 - **Tool-calling agent** — native OpenAI function-calling loop. Reads, writes, greps, globs, edits files via unified diffs, and runs shell commands across a workspace (PowerShell on Windows, bash on Linux/macOS).
